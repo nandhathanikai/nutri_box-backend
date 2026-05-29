@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.meal_tier import MealTier
@@ -623,27 +623,17 @@ def copy_week_images(payload: CopyWeekPayload, db: Session = Depends(get_db)):
 # ── IMAGE UPLOAD ──────────────────────────────────────────────────────────────
 
 @router.post("/upload-image", dependencies=admin_only)
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(request: Request, file: UploadFile = File(...)):
     """Upload image to Supabase storage and return public URL.
+    If Supabase is not configured, falls back to local file storage for local development.
 
     On failure, returns a structured detail dict:
       { error_type, message, raw }
     so the admin frontend can display a clear, actionable error banner.
     """
+    import logging
+    logger = logging.getLogger(__name__)
     from app.utils.supabase_errors import classify_supabase_error
-
-    if not supabase_client:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error_type": "storage_not_configured",
-                "message": (
-                    "Supabase storage is not configured on this server. "
-                    "Add SUPABASE_URL and SUPABASE_KEY to the backend .env file."
-                ),
-                "raw": "supabase_client is None",
-            },
-        )
 
     # Validate file type early
     allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -658,6 +648,51 @@ async def upload_image(file: UploadFile = File(...)):
             },
         )
 
+    # 1. Local Fallback Mode (No Supabase client)
+    if not supabase_client:
+        try:
+            contents = await file.read()
+            if not contents:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error_type": "empty_file",
+                        "message": "The uploaded file is empty. Please select a valid image.",
+                        "raw": "file content length = 0",
+                    },
+                )
+            
+            ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "jpg"
+            filename = f"{uuid.uuid4()}.{ext}"
+            
+            # Ensure upload folder exists
+            os.makedirs("static/uploads", exist_ok=True)
+            filepath = os.path.join("static/uploads", filename)
+            
+            # Save locally
+            with open(filepath, "wb") as f:
+                f.write(contents)
+            
+            # Form public URL dynamically using request's base URL
+            base_url = str(request.base_url).rstrip("/")
+            public_url = f"{base_url}/static/uploads/{filename}"
+            
+            logger.info("Local storage fallback used: saved file to %s, public URL: %s", filepath, public_url)
+            return {"image_url": public_url}
+            
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error_type": "local_storage_failed",
+                    "message": f"Failed to save file locally: {str(exc)}",
+                    "raw": str(exc),
+                }
+            )
+
+    # 2. Supabase Mode (Standard)
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "jpg"
     filename = f"menus/{uuid.uuid4()}.{ext}"
     bucket_name = os.environ.get("SUPABASE_BUCKET", "menu-images")
