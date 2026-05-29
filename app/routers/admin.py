@@ -222,7 +222,7 @@ def get_customers(
                 status_val = "EXPIRING" if (row.end_date - today).days <= 3 else "ACTIVE"
 
         customer_list.append({
-            "id": u.id,
+            "id": str(u.id),
             "email": u.email,
             "name": u.full_name,
             "phone": u.phone or "N/A",
@@ -526,7 +526,7 @@ def admin_create_user(
     db.refresh(new_user)
 
     return {
-        "id": new_user.id,
+        "id": str(new_user.id),
         "email": new_user.email,
         "full_name": new_user.full_name,
         "role": new_user.role,
