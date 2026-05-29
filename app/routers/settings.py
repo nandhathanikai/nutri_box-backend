@@ -152,3 +152,34 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(settings)
     return _to_admin(settings)
+
+
+@router.post("/clear-dashboard", dependencies=[Depends(require_admin)])
+def clear_dashboard(db: Session = Depends(get_db)):
+    """Reset all revenue, orders, cancellations, custom requests, and credits.
+    This restores the dashboard stats back to 0.
+    """
+    from fastapi import HTTPException
+    from app.models.subscription import Subscription
+    from app.models.credit import Credit, DeliveryCancellation
+    from app.models.custom_request import CustomPlanRequest
+    from app.models.audit_log import AuditLog
+
+    try:
+        # 1. Nullify circular FK dependencies to prevent constraint errors
+        db.query(DeliveryCancellation).update({DeliveryCancellation.credit_id: None})
+        db.query(Credit).update({Credit.cancellation_id: None})
+        db.commit()
+
+        # 2. Sequential delete to obey foreign key constraints safely
+        db.query(DeliveryCancellation).delete()
+        db.query(Credit).delete()
+        db.query(Subscription).delete()
+        db.query(CustomPlanRequest).delete()
+        db.query(AuditLog).delete()
+        
+        db.commit()
+        return {"status": "success", "message": "Dashboard statistics have been successfully reset."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to clear dashboard: {str(e)}")

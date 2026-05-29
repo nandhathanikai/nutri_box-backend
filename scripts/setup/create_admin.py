@@ -7,6 +7,14 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from app.database import SessionLocal
 from app.models.user import User
+from app.models.credit import DeliveryCancellation, Credit
+from app.models.subscription import Subscription
+from app.models.custom_request import CustomPlanRequest
+from app.models.marketing import Offer, Announcement
+from app.models.meal_tier import MealTier
+from app.models.menu import PlanTemplate, TierPricing, WeeklyMenuImage
+from app.models.settings import AppSettings
+from app.models.audit_log import AuditLog
 from app.utils.security import get_password_hash
 
 db = SessionLocal()

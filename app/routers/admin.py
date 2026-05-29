@@ -120,9 +120,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
 @router.get("/customers")
 def get_customers(
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
-    search: Optional[str] = Query(None, description="Substring match on name, email, or phone"),
+    page: int = 1,
+    limit: int = 50,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Admin customer list — paginated.
@@ -130,6 +130,13 @@ def get_customers(
     Returns {total, page, limit, data}. Default 50 per page, max 200. Server
     enforces both bounds so the frontend can't accidentally request 100k rows.
     """
+    if page < 1:
+        page = 1
+    if limit < 1:
+        limit = 50
+    elif limit > 200:
+        limit = 200
+
     today = date.today()
 
     base_q = db.query(User).filter(User.role.in_(["customer", "admin"]))
