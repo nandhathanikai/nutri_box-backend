@@ -127,8 +127,8 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
         landmark=user.landmark,
         location_link=user.location_link,
         hashed_password=get_password_hash(user.password),
-        email_verified=False,
-        email_verification_token=token,
+        email_verified=True,
+        email_verification_token=None,
     )
 
     db.add(new_user)
@@ -160,12 +160,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please verify your email before logging in. Check your inbox for a verification link.",
-        )
-
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -179,12 +173,6 @@ def login_json(credentials: UserLogin, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if not user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please verify your email before logging in. Check your inbox for a verification link.",
         )
 
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
