@@ -4,7 +4,6 @@ sqlalchemy==2.0.50
 sqlalchemy-cockroachdb==2.0.4
 psycopg2-binary==2.9.10
 pydantic==2.12.5
-pydantic_core==2.33.2
 python-dotenv==1.2.1
 python-jose==3.5.0
 passlib==1.7.4
