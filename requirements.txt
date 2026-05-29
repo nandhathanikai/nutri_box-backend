@@ -1,9 +1,11 @@
 fastapi==0.135.1
 uvicorn==0.42.0
+gunicorn==23.0.0
 sqlalchemy==2.0.50
 sqlalchemy-cockroachdb==2.0.4
 pydantic==2.12.5
 pydantic_core==2.41.5
+email-validator==2.2.0
 python-dotenv==1.2.1
 python-jose==3.5.0
 passlib==1.7.4
@@ -17,5 +19,5 @@ typing_extensions==4.15.0
 greenlet==3.5.1
 psycopg2-binary==2.9.10
 pytz==2025.2
-sib-api-v3-sdk
-razorpay
+sib-api-v3-sdk==3.3.0
+razorpay==1.4.2
