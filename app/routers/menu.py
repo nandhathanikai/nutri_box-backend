@@ -383,6 +383,17 @@ def patch_tier_pricing(pricing_id: str, payload: PricingPatchPayload, db: Sessio
     return {"message": "Updated"}
 
 
+@router.delete("/tier-pricing/{pricing_id}", dependencies=admin_only)
+def delete_tier_pricing(pricing_id: str, db: Session = Depends(get_db)):
+    """Delete a tier pricing row."""
+    row = db.query(TierPricing).filter(TierPricing.id == pricing_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Pricing row not found")
+    db.delete(row)
+    db.commit()
+    return {"message": "Deleted"}
+
+
 # ── PLAN COMBINATION ENDPOINTS ────────────────────────────────────────────────
 
 @router.get("/plan-combinations")
