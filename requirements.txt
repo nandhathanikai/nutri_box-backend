@@ -17,4 +17,5 @@ typing_extensions==4.15.0
 greenlet==3.5.1
 psycopg2-binary==2.9.10
 pytz==2025.2
+sib-api-v3-sdk
 razorpay
