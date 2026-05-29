@@ -38,6 +38,7 @@ from app.models import settings      # noqa: F401, E402
 from app.models import marketing     # noqa: F401, E402
 from app.models import audit_log     # noqa: F401, E402
 from app.models import meal_tier     # noqa: F401, E402
+from app.models import custom_request# noqa: F401, E402
 
 target_metadata = Base.metadata
 

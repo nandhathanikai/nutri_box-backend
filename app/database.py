@@ -13,11 +13,12 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(
     DATABASE_URL,
-    pool_size=5,           # Persistent connections kept open
-    max_overflow=10,       # Extra connections allowed under burst load
-    pool_pre_ping=True,    # Verify connection is alive before handing it out
-    pool_recycle=1800,     # Recycle connections after 30 min (avoids stale TCP)
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=1800,
 )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -35,6 +36,6 @@ def test_connection():
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version()"))
-            logger.info("DB Connected! PostgreSQL version: %s", result.fetchone()[0])
+            logger.info("DB Connected! CockroachDB version: %s", result.fetchone()[0])
     except Exception as e:
         logger.error("DB Connection failed: %s", e)

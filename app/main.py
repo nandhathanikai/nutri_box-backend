@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # ── Logging — must be configured before any other app imports ────────────────
 from app.logging_config import setup_logging
@@ -19,12 +21,14 @@ from app.models import credit as credit_models  # noqa: F401  registers Delivery
 from app.models import settings as settings_models  # noqa: F401  registers AppSettings
 from app.models import marketing as marketing_models  # noqa: F401  registers Announcement, Offer
 from app.models import audit_log as audit_log_models  # noqa: F401  registers AuditLog
+from app.models import custom_request as custom_request_models  # noqa: F401 registers CustomPlanRequest
 from app.routers import auth, admin, menu, settings
 from app.routers import announcements as announcements_router
 from app.routers import offers as offers_router
 from app.routers import subscriptions as subscriptions_router
 from app.routers import credits as credits_router
 from app.routers import payments as payments_router
+from app.routers import custom_requests as custom_requests_router
 from app.jobs.scheduler import start_scheduler
 
 
@@ -51,7 +55,25 @@ async def lifespan(app: FastAPI):
     logger.info("Nutribox API shutting down")
 
 
-app = FastAPI(title="Nutribox API", version="1.0.0", lifespan=lifespan)
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+is_production = os.getenv("ENVIRONMENT", "").lower() == "production"
+
+app = FastAPI(
+    title="Nutribox API",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json"
+)
 
 # CORS — additional origins can be set via FRONTEND_ORIGINS env (comma-separated).
 _default_origins = [
@@ -69,6 +91,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Routers
 app.include_router(auth.router, prefix="/api/auth")
@@ -80,6 +104,7 @@ app.include_router(announcements_router.router)
 app.include_router(offers_router.router)
 app.include_router(subscriptions_router.router)
 app.include_router(payments_router.router)
+app.include_router(custom_requests_router.router)
 
 
 @app.get("/")
