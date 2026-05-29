@@ -153,10 +153,16 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     # Find user by email (OAuth2 uses 'username' field, which we map to email)
     user = db.query(User).filter(User.email == form_data.username).first()
     
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No user found with this email. Please create an account.",
+        )
+    
+    if not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect password. Please try again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -168,10 +174,16 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 def login_json(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
     
-    if not user or not verify_password(credentials.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No user found with this email. Please create an account.",
+        )
+    
+    if not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect password. Please try again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
