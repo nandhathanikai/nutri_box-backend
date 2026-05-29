@@ -132,7 +132,7 @@ def get_customers(
     """
     today = date.today()
 
-    base_q = db.query(User).filter(User.role.ilike("customer"))
+    base_q = db.query(User).filter(User.role.in_(["customer", "admin"]))
     if search:
         like = f"%{search.strip()}%"
         base_q = base_q.filter(or_(
@@ -232,6 +232,7 @@ def get_customers(
             "endDate": e_date or "N/A",
             "credits": credit_map.get(u.id, 0),
             "status": status_val,
+            "role": u.role or "customer",
         })
 
     return {"total": total, "page": page, "limit": limit, "data": customer_list}
@@ -564,6 +565,9 @@ def delete_customer(
         "created_at": target.created_at.isoformat() if target.created_at else None,
     }
 
+    # Disassociate subscriptions to satisfy the foreign key constraint and preserve records
+    db.query(Subscription).filter(Subscription.customer_id == user_id).update({Subscription.customer_id: None})
+
     db.delete(target)
     db.add(AuditLog(
         actor_id=admin.id,
@@ -576,3 +580,37 @@ def delete_customer(
     db.commit()
     logger.info("Admin %s (id=%s) deleted customer id=%s email=%s", admin.email, admin.id, user_id, snapshot["email"])
     return
+
+
+class ChangeRolePayload(BaseModel):
+    role: str
+
+    @validator("role")
+    def _valid_role(cls, v: str):
+        v = (v or "").lower().strip()
+        if v not in ("customer", "admin"):
+            raise ValueError("role must be 'customer' or 'admin'")
+        return v
+
+
+@router.put("/customers/{user_id}/role")
+def change_customer_role(
+    user_id: int,
+    payload: ChangeRolePayload,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_user),
+):
+    """Change a user's role to either 'customer' or 'admin'."""
+    if not admin.role or admin.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="You cannot change your own role.")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    target.role = payload.role
+    db.commit()
+    return {"message": f"Role updated to {payload.role}"}
