@@ -144,8 +144,21 @@ class CopyWeekPayload(BaseModel):
     target_week: date
 
 
-class PlanPatch(BaseModel):
-    is_active: bool
+class PlanUpdatePayload(BaseModel):
+    is_active: Optional[bool] = None
+    price: Optional[float] = None
+    delivery_charge: Optional[float] = None
+    meal_count: Optional[int] = None
+
+
+class PlanCreatePayload(BaseModel):
+    tier_id: str
+    diet_type: str
+    duration: str
+    slot_combo: str
+    meal_count: Optional[int] = None
+    price: Optional[float] = None
+    delivery_charge: Optional[float] = None
 
 
 # ── TIER ENDPOINTS ────────────────────────────────────────────────────────────
@@ -398,7 +411,7 @@ def delete_tier_pricing(pricing_id: str, db: Session = Depends(get_db)):
 
 @router.get("/plan-combinations")
 def get_plan_combinations(db: Session = Depends(get_db)):
-    """Returns all non-legacy plan combinations with computed prices."""
+    """Returns all non-legacy plan combinations with computed or overridden prices."""
     plans = db.query(PlanTemplate).filter(PlanTemplate.is_legacy == False).all()
     tiers = {str(t.id): t for t in db.query(MealTier).all()}
     today = date.today()
@@ -411,9 +424,20 @@ def get_plan_combinations(db: Session = Depends(get_db)):
 
         price_per_meal = _get_current_price(str(p.tier_id), p.diet_type, db, today)
         meal_count = p.meal_count or MEAL_COUNT_MAP.get((p.slot_combo, p.duration), 0)
-        delivery_per_meal = float(tier.delivery_charge_weekly if p.duration == "weekly" else tier.delivery_charge_monthly or 0)
-        delivery = round(delivery_per_meal * meal_count, 2)
-        total_price = round(price_per_meal * meal_count + delivery, 2)
+        
+        # Use template override delivery_charge if set, otherwise calculate from tier
+        if p.delivery_charge is not None:
+            delivery = float(p.delivery_charge)
+        else:
+            delivery_per_meal = float(tier.delivery_charge_weekly if p.duration == "weekly" else tier.delivery_charge_monthly or 0)
+            delivery = round(delivery_per_meal * meal_count, 2)
+            
+        # Use template override price if set, otherwise calculate dynamically
+        if p.price is not None:
+            total_price = float(p.price)
+        else:
+            total_price = round(price_per_meal * meal_count + delivery, 2)
+            
         display_name = _generate_display_name(tier.name, p.diet_type, p.slot_combo or "", p.duration or "")
 
         result.append({
@@ -430,19 +454,68 @@ def get_plan_combinations(db: Session = Depends(get_db)):
             "total_price": total_price,
             "display_name": display_name,
             "is_active": p.is_active,
+            "override_price": float(p.price) if p.price is not None else None,
+            "override_delivery_charge": float(p.delivery_charge) if p.delivery_charge is not None else None,
         })
     return result
 
 
+@router.post("/plan-combinations", dependencies=admin_only)
+def create_plan_combination(payload: PlanCreatePayload, db: Session = Depends(get_db)):
+    """Create a new plan combination template."""
+    if payload.diet_type not in ("veg", "nonveg"):
+        raise HTTPException(status_code=400, detail="diet_type must be 'veg' or 'nonveg'")
+    if payload.duration not in ("weekly", "monthly"):
+        raise HTTPException(status_code=400, detail="duration must be 'weekly' or 'monthly'")
+    if payload.slot_combo not in ("breakfast_only", "dinner_only", "both"):
+        raise HTTPException(status_code=400, detail="slot_combo must be 'breakfast_only', 'dinner_only', or 'both'")
+
+    existing = db.query(PlanTemplate).filter(
+        PlanTemplate.tier_id == payload.tier_id,
+        PlanTemplate.diet_type == payload.diet_type,
+        PlanTemplate.duration == payload.duration,
+        PlanTemplate.slot_combo == payload.slot_combo,
+        PlanTemplate.is_legacy == False
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=409, detail="This combination already exists")
+
+    new_plan = PlanTemplate(
+        tier_id=payload.tier_id,
+        diet_type=payload.diet_type,
+        duration=payload.duration,
+        slot_combo=payload.slot_combo,
+        meal_count=payload.meal_count,
+        price=payload.price,
+        delivery_charge=payload.delivery_charge,
+        is_active=True,
+        is_legacy=False
+    )
+    db.add(new_plan)
+    db.commit()
+    db.refresh(new_plan)
+    return {"id": str(new_plan.id), "message": "Plan combination created successfully"}
+
+
 @router.patch("/plan-combinations/{plan_id}", dependencies=admin_only)
-def toggle_plan_combination(plan_id: str, payload: PlanPatch, db: Session = Depends(get_db)):
-    """Toggle is_active for a plan combination."""
+def update_plan_combination(plan_id: str, payload: PlanUpdatePayload, db: Session = Depends(get_db)):
+    """Update properties for a plan combination (status, override price, override delivery, meal count)."""
     plan = db.query(PlanTemplate).filter(PlanTemplate.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    plan.is_active = payload.is_active
+
+    if payload.is_active is not None:
+        plan.is_active = payload.is_active
+    if payload.price is not None:
+        plan.price = None if payload.price < 0 else payload.price
+    if payload.delivery_charge is not None:
+        plan.delivery_charge = None if payload.delivery_charge < 0 else payload.delivery_charge
+    if payload.meal_count is not None:
+        plan.meal_count = payload.meal_count
+
     db.commit()
-    return {"message": "Updated"}
+    return {"message": "Plan updated successfully"}
 
 
 @router.get("/plans/compute")

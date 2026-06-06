@@ -6,8 +6,8 @@ from datetime import datetime
 class UserBase(BaseModel):
     full_name: str
     email: EmailStr
-    phone: str
-    address_line_1: str
+    phone: Optional[str] = None
+    address_line_1: Optional[str] = None   # drivers created by admin have no address
     address_line_2: Optional[str] = None
     landmark: Optional[str] = None
     location_link: Optional[str] = None
@@ -29,6 +29,9 @@ class UserResponse(UserBase):
     notif_subscriptions: Optional[bool] = True
     notif_offers: Optional[bool] = False
     email_verified: Optional[bool] = False
+    is_active: Optional[bool] = True
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
     # Account-state derivations populated by the /me endpoint, not stored on the model
     has_subscription: Optional[bool] = None
@@ -47,6 +50,9 @@ class UserUpdate(BaseModel):
     address_line_2: Optional[str] = None
     landmark: Optional[str] = None
     location_link: Optional[str] = None
+    # Customer can update their geocoded coordinates directly (from GPS or map link)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class NotificationPrefsUpdate(BaseModel):

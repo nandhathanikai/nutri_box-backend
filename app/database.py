@@ -17,6 +17,11 @@ engine = create_engine(
     max_overflow=10,
     pool_pre_ping=True,
     pool_recycle=1800,
+    pool_timeout=30,           # fail fast if pool is exhausted (don't hang forever)
+    connect_args={
+        "connect_timeout": 10, # TCP handshake timeout in seconds
+        "application_name": "nutribox_api",
+    },
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

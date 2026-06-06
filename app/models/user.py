@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -16,6 +16,13 @@ class User(Base):
     address_line_2 = Column(String, nullable=True)
     landmark = Column(String, nullable=True)
     location_link = Column(String, nullable=True)
+
+    # Geocoded coordinates (populated from address or GPS or map link)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    # Account state — used to activate/deactivate drivers
+    is_active = Column(Boolean, default=True, nullable=False)
 
     # Auth
     hashed_password = Column(String, nullable=False)

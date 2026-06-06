@@ -6,7 +6,9 @@ from datetime import date
 
 from app.database import get_db
 from app.models.marketing import Offer
-from app.routers.auth import require_admin
+from app.models.subscription import Subscription
+from app.routers.auth import require_admin, get_current_user
+from app.models.user import User
 
 router = APIRouter(prefix="/api/offers", tags=["Offers"])
 admin_only = [Depends(require_admin)]
@@ -24,11 +26,18 @@ class OfferCreate(BaseModel):
     valid_from:  date
     valid_until: date
     status:      Optional[str] = "active"
+    audience:    Optional[str] = "all"   # all | new_user | existing_user
 
     @validator("type")
     def valid_type(cls, v):
         if v not in ("pct", "flat", "free"):
             raise ValueError("type must be pct, flat, or free")
+        return v
+
+    @validator("audience")
+    def valid_audience(cls, v):
+        if v not in ("all", "new_user", "existing_user"):
+            raise ValueError("audience must be all, new_user, or existing_user")
         return v
 
     @validator("code")
@@ -48,6 +57,7 @@ class OfferResponse(BaseModel):
     valid_from:  date
     valid_until: date
     status:      str
+    audience:    str
 
     class Config:
         orm_mode = True
@@ -172,3 +182,39 @@ def redeem_offer(offer_id: int, db: Session = Depends(get_db)):
         offer.status = "expired"
     db.commit()
     return {"detail": "Redeemed"}
+
+
+@router.get("/my-offers", response_model=List[OfferResponse])
+def get_my_offers(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return active, audience-matched offers for the logged-in customer.
+
+    - audience='all'           → returned for every user
+    - audience='new_user'      → returned only if user has NEVER had a subscription
+    - audience='existing_user' → returned only if user HAS had at least one subscription
+    """
+    _auto_expire(db)
+    today = date.today()
+
+    # Determine if this user has ever subscribed
+    ever_subscribed = db.query(Subscription.id).filter(
+        Subscription.customer_id == current_user.id
+    ).first() is not None
+
+    # Build audience filter
+    from sqlalchemy import or_
+    if ever_subscribed:
+        audience_filter = or_(Offer.audience == "all", Offer.audience == "existing_user")
+    else:
+        audience_filter = or_(Offer.audience == "all", Offer.audience == "new_user")
+
+    offers = db.query(Offer).filter(
+        Offer.status == "active",
+        Offer.valid_from <= today,
+        Offer.valid_until >= today,
+        audience_filter,
+    ).order_by(Offer.id.desc()).all()
+
+    return offers

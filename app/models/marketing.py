@@ -34,4 +34,17 @@ class Offer(Base):
     valid_from  = Column(Date, nullable=False)
     valid_until = Column(Date, nullable=False)
     status      = Column(String(20), default="active")  # active | draft | expired
+    # Audience targeting: all | new_user | existing_user
+    audience    = Column(String(30), default="all", nullable=False)
     created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+class GalleryImage(Base):
+    """Showcase gallery images uploaded by admin for dashboard display."""
+    __tablename__ = "gallery_images"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    image_url  = Column(String(500), nullable=False)
+    caption    = Column(String(255), nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+

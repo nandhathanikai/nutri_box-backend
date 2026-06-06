@@ -23,6 +23,7 @@ from app.models import settings as settings_models  # noqa: F401  registers AppS
 from app.models import marketing as marketing_models  # noqa: F401  registers Announcement, Offer
 from app.models import audit_log as audit_log_models  # noqa: F401  registers AuditLog
 from app.models import custom_request as custom_request_models  # noqa: F401 registers CustomPlanRequest
+from app.models import delivery as delivery_models  # noqa: F401  registers DeliverySession, DeliveryAssignment, DeliveryTracking, DriverStatus
 from app.routers import auth, admin, menu, settings
 from app.routers import announcements as announcements_router
 from app.routers import offers as offers_router
@@ -30,7 +31,12 @@ from app.routers import subscriptions as subscriptions_router
 from app.routers import credits as credits_router
 from app.routers import payments as payments_router
 from app.routers import custom_requests as custom_requests_router
+from app.routers import gallery as gallery_router
+from app.routers import delivery as delivery_router
+from app.routers import driver as driver_router
+from app.routers import tracking as tracking_router
 from app.jobs.scheduler import start_scheduler
+
 
 
 # ── Lifespan (replaces deprecated @app.on_event) ────────────────────────────
@@ -110,6 +116,11 @@ app.include_router(offers_router.router)
 app.include_router(subscriptions_router.router)
 app.include_router(payments_router.router)
 app.include_router(custom_requests_router.router)
+app.include_router(gallery_router.router)
+app.include_router(delivery_router.router)
+app.include_router(driver_router.router)
+app.include_router(tracking_router.router)
+
 
 
 @app.get("/")

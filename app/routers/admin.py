@@ -479,6 +479,8 @@ class AdminUserCreate(BaseModel):
     landmark: Optional[str] = None
     location_link: Optional[str] = None
     role: str = "customer"        # 'customer' | 'admin'
+    plan_id: Optional[str] = None
+    subscription_start_date: Optional[date] = None
 
     @validator("role")
     def _valid_role(cls, v: str):
@@ -512,10 +514,17 @@ def admin_create_user(
 
     Same shape as public `/api/auth/signup` but with a role selector.
     Address fields stay optional (admin may add a customer who hasn't given one).
+    Optional plan_id and subscription_start_date allow adding a customer with an active subscription.
     """
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
+
+    plan = None
+    if payload.plan_id:
+        plan = db.query(PlanTemplate).filter(PlanTemplate.id == payload.plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan combination not found.")
 
     new_user = User(
         full_name=payload.full_name,
@@ -531,6 +540,31 @@ def admin_create_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    if plan:
+        from app.routers.subscriptions import _next_working_day, _last_delivery_date
+
+        start = payload.subscription_start_date or date.today()
+        # Shift start to next working day if it is a Sunday
+        start = _next_working_day(start)
+        end = _last_delivery_date(start, plan.duration or "weekly")
+
+        ppm_snapshot = None
+        if plan.meal_count and plan.price:
+            ppm_snapshot = round(float(plan.price) / plan.meal_count, 2)
+        else:
+            from app.routers.menu import _get_current_price
+            ppm_snapshot = _get_current_price(str(plan.tier_id), plan.diet_type, db) or None
+
+        new_sub = Subscription(
+            customer_id=new_user.id,
+            menu_id=plan.id,
+            start_date=start,
+            end_date=end,
+            price_per_meal_snapshot=ppm_snapshot,
+        )
+        db.add(new_sub)
+        db.commit()
 
     return {
         "id": str(new_user.id),

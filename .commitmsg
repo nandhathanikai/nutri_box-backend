@@ -1,0 +1,8 @@
+fix: customers grid 500 error and add clear-dashboard reset endpoint
+
+- Fixed get_customers() - search param defaulted to FastAPI Query object
+  instead of None when not passed, causing AttributeError on .strip()
+- Added POST /api/settings/clear-dashboard admin endpoint that safely
+  deletes all subscriptions, credits, cancellations, custom requests
+  and audit logs (nullifies circular FKs first to avoid constraint errors)
+- Updated create_admin.py to import all models to fix SQLAlchemy registry
