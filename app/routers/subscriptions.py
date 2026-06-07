@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from app.database import get_db
-from app.models.credit import DeliveryCancellation
+from app.models.credit import DeliveryCancellation, Credit
 from app.models.meal_tier import MealTier
 from app.models.menu import PlanTemplate
 from app.models.subscription import Subscription
 from app.models.user import User
 from app.routers.auth import get_current_user
 from app.routers.menu import MEAL_COUNT_MAP, DURATION_WORKING_DAYS, _get_current_price
-from app.utils.credits import compute_cutoff, is_cancellation_eligible
+from app.utils.credits import compute_cutoff, is_cancellation_eligible, get_last_credit_delivery_date
 from app.utils.rate_limit import rate_limit
 
 
@@ -281,9 +281,23 @@ def create_subscription(
             detail="You already have an active subscription. Wait for it to end or cancel it first.",
         )
 
-    requested_start = payload.start_date or (today + timedelta(days=1))
-    if requested_start < today:
+    if payload.start_date and payload.start_date < today:
         raise HTTPException(status_code=400, detail="start_date cannot be in the past.")
+
+    # Squeeze logic: new plan starts after the last scheduled credit delivery
+    scheduled_credits = db.query(Credit).filter(
+        Credit.user_id == current_user.id,
+        Credit.status == 'scheduled'
+    ).all()
+    earliest_start = get_last_credit_delivery_date(scheduled_credits, today)
+    if scheduled_credits:
+        earliest_start = earliest_start + timedelta(days=1)
+
+    requested_start = payload.start_date or (today + timedelta(days=1))
+    if requested_start < earliest_start:
+        requested_start = earliest_start
+    if requested_start < today:
+        requested_start = today + timedelta(days=1)
 
     # Nutribox delivers Mon–Sat. Shift Sunday starts to Monday.
     start = _next_working_day(requested_start)

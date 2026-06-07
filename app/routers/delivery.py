@@ -67,7 +67,7 @@ def list_sessions(db: Session = Depends(get_db)):
     sessions = db.query(DeliverySession).order_by(DeliverySession.display_order).all()
     return [
         {
-            "id": s.id,
+            "id": str(s.id),
             "name": s.name,
             "slug": s.slug,
             "display_order": s.display_order,
@@ -94,7 +94,7 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
     db.add(s)
     db.commit()
     db.refresh(s)
-    return {"id": s.id, "name": s.name, "slug": s.slug, "display_order": s.display_order, "is_active": s.is_active}
+    return {"id": str(s.id), "name": s.name, "slug": s.slug, "display_order": s.display_order, "is_active": s.is_active}
 
 
 @router.put("/sessions/{session_id}")
@@ -111,7 +111,7 @@ def update_session(session_id: int, payload: SessionUpdate, db: Session = Depend
         s.is_active = payload.is_active
     db.commit()
     db.refresh(s)
-    return {"id": s.id, "name": s.name, "slug": s.slug, "display_order": s.display_order, "is_active": s.is_active}
+    return {"id": str(s.id), "name": s.name, "slug": s.slug, "display_order": s.display_order, "is_active": s.is_active}
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -249,7 +249,7 @@ def update_driver(driver_id: int, payload: DriverUpdate, db: Session = Depends(g
         driver.is_active = payload.is_active
     db.commit()
     db.refresh(driver)
-    return {"id": driver.id, "full_name": driver.full_name, "phone": driver.phone, "is_active": driver.is_active}
+    return {"id": str(driver.id), "full_name": driver.full_name, "phone": driver.phone, "is_active": driver.is_active}
 
 
 @router.patch("/drivers/{driver_id}/toggle-active")
@@ -260,7 +260,33 @@ def toggle_driver_active(driver_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Driver not found.")
     driver.is_active = not driver.is_active
     db.commit()
-    return {"id": driver.id, "is_active": driver.is_active}
+    return {"id": str(driver.id), "is_active": driver.is_active}
+
+
+@router.delete("/drivers/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_driver(
+    driver_id: int,
+    db: Session = Depends(get_db),
+):
+    """Hard-delete a driver account.
+
+    Deletes related driver status and nullifies/deletes assignments where needed.
+    """
+    driver = db.query(User).filter(User.id == driver_id, User.role == "driver").first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found.")
+
+    # 1. Clean up driver status
+    db.query(DriverStatus).filter(DriverStatus.driver_id == driver_id).delete()
+
+    # 2. Nullify driver on delivery assignments
+    db.query(DeliveryAssignment).filter(DeliveryAssignment.driver_id == driver_id).update(
+        {DeliveryAssignment.driver_id: None, DeliveryAssignment.status: "unassigned"}
+    )
+
+    db.delete(driver)
+    db.commit()
+    return
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -343,7 +369,7 @@ def get_delivery_orders(db: Session = Depends(get_db)):
             drivers_map[d.id] = d
 
     # Group results by session
-    session_groups = {s.id: {"session": s.name, "session_id": s.id, "slug": s.slug, "orders": [], "skipped": []} for s in sessions}
+    session_groups = {s.id: {"session": s.name, "session_id": str(s.id), "slug": s.slug, "orders": [], "skipped": []} for s in sessions}
 
     for sub in active_subs:
         user = users.get(sub.customer_id)
@@ -382,9 +408,9 @@ def get_delivery_orders(db: Session = Depends(get_db)):
                 "plan_name": plan.name if plan else "—",
                 "diet_type": plan.diet_type if plan else "—",
                 "session_slug": slug,
-                "assignment_id": assignment.id if assignment else None,
+                "assignment_id": str(assignment.id) if assignment else None,
                 "assignment_status": assignment.status if assignment else "unassigned",
-                "driver_id": driver.id if driver else None,
+                "driver_id": str(driver.id) if driver else None,
                 "driver_name": driver.full_name if driver else None,
             }
 
@@ -438,20 +464,26 @@ def assign_orders(payload: AssignPayload, db: Session = Depends(get_db)):
 
     created = []
     skipped = []
+    
+    sub_ids = [int(sid) for sid in payload.subscription_ids]
+    subs = {s.id: s for s in db.query(Subscription).filter(Subscription.id.in_(sub_ids)).all()}
+    
+    existing_assignments = {
+        a.subscription_id for a in db.query(DeliveryAssignment).filter(
+            DeliveryAssignment.subscription_id.in_(sub_ids),
+            DeliveryAssignment.session_id == _session_id,
+            DeliveryAssignment.delivery_date == d_date,
+        ).all()
+    }
+
     for sub_id_str in payload.subscription_ids:
         _sub_id = int(sub_id_str)
-        sub = db.query(Subscription).filter(Subscription.id == _sub_id).first()
+        sub = subs.get(_sub_id)
         if not sub:
             skipped.append(sub_id_str)
             continue
 
-        # Check if already assigned
-        existing = db.query(DeliveryAssignment).filter(
-            DeliveryAssignment.subscription_id == _sub_id,
-            DeliveryAssignment.session_id      == _session_id,
-            DeliveryAssignment.delivery_date   == d_date,
-        ).first()
-        if existing:
+        if _sub_id in existing_assignments:
             skipped.append(sub_id_str)
             continue
 
@@ -503,14 +535,14 @@ def get_monitor(db: Session = Depends(get_db)):
         ds = statuses.get(d.id)
         current_session = sessions_map.get(ds.current_session_id).name if (ds and ds.current_session_id and ds.current_session_id in sessions_map) else None
         result.append({
-            "driver_id": d.id,
+            "driver_id": str(d.id),
             "driver_name": d.full_name,
             "email": d.email,
             "phone": d.phone,
             "is_active": d.is_active,
             "online_status": ds.status if ds else "offline",
             "current_session": current_session,
-            "current_assignment_id": ds.current_assignment_id if ds else None,
+            "current_assignment_id": str(ds.current_assignment_id) if (ds and ds.current_assignment_id) else None,
             "last_latitude": ds.last_latitude if ds else None,
             "last_longitude": ds.last_longitude if ds else None,
             "last_updated": ds.last_updated.isoformat() if ds and ds.last_updated else None,

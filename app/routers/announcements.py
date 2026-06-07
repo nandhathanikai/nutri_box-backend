@@ -6,7 +6,8 @@ from datetime import date
 
 from app.database import get_db
 from app.models.marketing import Announcement
-from app.routers.auth import require_admin
+from app.routers.auth import require_admin, get_current_user_optional
+from app.models.user import User
 
 router = APIRouter(prefix="/api/announcements", tags=["Announcements"])
 admin_only = [Depends(require_admin)]
@@ -59,11 +60,23 @@ def _expire_old(db: Session):
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=List[AnnouncementResponse])
-def list_announcements(status: Optional[str] = None, db: Session = Depends(get_db)):
+def list_announcements(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     _expire_old(db)
     q = db.query(Announcement)
-    if status:
+    
+    # Check if user is admin
+    is_admin = current_user and current_user.role and current_user.role.lower() == "admin"
+    
+    if not is_admin:
+        # Customers and unauthenticated users can only see active announcements
+        q = q.filter(Announcement.status == "active")
+    elif status:
         q = q.filter(Announcement.status == status)
+        
     return q.order_by(Announcement.start_date.desc()).all()
 
 @router.post("", response_model=AnnouncementResponse, dependencies=admin_only)

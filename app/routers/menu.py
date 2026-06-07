@@ -168,12 +168,22 @@ def get_tiers(db: Session = Depends(get_db)):
     """Get all tiers with current pricing."""
     tiers = db.query(MealTier).order_by(MealTier.display_order.asc()).all()
     today = date.today()
+    
+    tier_ids = [t.id for t in tiers]
+    all_pricing = db.query(TierPricing).filter(
+        TierPricing.tier_id.in_(tier_ids)
+    ).order_by(TierPricing.diet_type, TierPricing.effective_from.desc()).all()
+    
+    pricing_by_tier = {}
+    for p in all_pricing:
+        tier_id_str = str(p.tier_id)
+        if tier_id_str not in pricing_by_tier:
+            pricing_by_tier[tier_id_str] = []
+        pricing_by_tier[tier_id_str].append(p)
+        
     result = []
     for t in tiers:
-        # Get current active pricing rows for this tier
-        pricing_rows = db.query(TierPricing).filter(
-            TierPricing.tier_id == t.id
-        ).order_by(TierPricing.diet_type, TierPricing.effective_from.desc()).all()
+        pricing_rows = pricing_by_tier.get(str(t.id), [])
 
         # Deduplicate: keep most recent effective_from per diet_type that is <= today
         current_pricing = {}
@@ -416,13 +426,24 @@ def get_plan_combinations(db: Session = Depends(get_db)):
     tiers = {str(t.id): t for t in db.query(MealTier).all()}
     today = date.today()
 
+    pricing_rows = db.query(TierPricing).filter(
+        TierPricing.effective_from <= today,
+        TierPricing.is_active == True
+    ).order_by(TierPricing.effective_from.desc()).all()
+    
+    active_pricing = {}
+    for p in pricing_rows:
+        key = (str(p.tier_id), p.diet_type)
+        if key not in active_pricing:
+            active_pricing[key] = float(p.price_per_meal)
+
     result = []
     for p in plans:
         tier = tiers.get(str(p.tier_id))
         if not tier:
             continue
 
-        price_per_meal = _get_current_price(str(p.tier_id), p.diet_type, db, today)
+        price_per_meal = active_pricing.get((str(p.tier_id), p.diet_type), 0.0)
         meal_count = p.meal_count or MEAL_COUNT_MAP.get((p.slot_combo, p.duration), 0)
         
         # Use template override delivery_charge if set, otherwise calculate from tier
@@ -574,6 +595,11 @@ def get_weekly_images(
     if tier_id:
         tiers = [t for t in tiers if str(t.id) == tier_id]
 
+    images = db.query(WeeklyMenuImage).filter(
+        WeeklyMenuImage.week_start_date == monday
+    ).all()
+    img_map = {(str(img.tier_id), img.diet_type): img.image_url for img in images}
+
     result = []
     coverage_status = []
 
@@ -590,7 +616,10 @@ def get_weekly_images(
             diet_types = [d for d in diet_types if d == diet_type]
 
         for dt in diet_types:
-            image_url = _resolve_weekly_image(str(tier.id), dt, monday, db)
+            image_url = img_map.get((str(tier.id), dt))
+            if not image_url:
+                image_url = img_map.get((str(tier.id), 'both'))
+                
             coverage_status.append({
                 "tier_id": str(tier.id),
                 "tier_name": tier.name,
@@ -708,7 +737,7 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     logger = logging.getLogger(__name__)
     from app.utils.supabase_errors import classify_supabase_error
 
-    # Validate file type early
+    # Validate file type and extension early
     allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
     content_type = file.content_type or "image/jpeg"
     if content_type not in allowed_types:
@@ -718,6 +747,19 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
                 "error_type": "invalid_file_type",
                 "message": f"Unsupported file type '{content_type}'. Please upload a JPEG, PNG, or WebP image.",
                 "raw": f"content_type={content_type}",
+            },
+        )
+
+    # Validate filename extension strictly
+    filename_lower = (file.filename or "").lower()
+    ext = filename_lower.split(".")[-1] if filename_lower and "." in filename_lower else "jpg"
+    if ext not in {"jpg", "jpeg", "png", "webp", "gif"}:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_type": "invalid_file_extension",
+                "message": f"Unsupported file extension '.{ext}'. Please upload a JPEG, PNG, or WebP image.",
+                "raw": f"extension={ext}",
             },
         )
 
@@ -735,7 +777,6 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
                     },
                 )
             
-            ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "jpg"
             filename = f"{uuid.uuid4()}.{ext}"
             
             # Ensure upload folder exists
@@ -766,7 +807,6 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
             )
 
     # 2. Supabase Mode (Standard)
-    ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "jpg"
     filename = f"menus/{uuid.uuid4()}.{ext}"
     bucket_name = os.environ.get("SUPABASE_BUCKET", "menu-images")
 

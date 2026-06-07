@@ -87,8 +87,8 @@ class ConnectionManager:
         """
         payload = json.dumps({
             "type": "location_update",
-            "assignment_id": assignment_id,
-            "driver_id": driver_id,
+            "assignment_id": str(assignment_id),
+            "driver_id": str(driver_id),
             "latitude": latitude,
             "longitude": longitude,
             "recorded_at": recorded_at.isoformat(),
@@ -127,7 +127,7 @@ class ConnectionManager:
         """Notify all listeners that a delivery status changed (e.g. delivered)."""
         payload = json.dumps({
             "type": "status_change",
-            "assignment_id": assignment_id,
+            "assignment_id": str(assignment_id),
             "status": status,
             "server_time": datetime.now(timezone.utc).isoformat(),
         })

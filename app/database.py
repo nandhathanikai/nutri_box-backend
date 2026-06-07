@@ -15,7 +15,7 @@ engine = create_engine(
     DATABASE_URL,
     pool_size=5,
     max_overflow=10,
-    pool_pre_ping=True,
+    pool_pre_ping=False,
     pool_recycle=1800,
     pool_timeout=30,           # fail fast if pool is exhausted (don't hang forever)
     connect_args={

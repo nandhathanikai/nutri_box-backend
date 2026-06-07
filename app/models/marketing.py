@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.database import Base
 
 class Announcement(Base):
@@ -47,4 +48,19 @@ class GalleryImage(Base):
     caption    = Column(String(255), nullable=True)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Review(Base):
+    """Customer reviews about meals / brand."""
+    __tablename__ = "reviews"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("users.id"), index=True)
+    rating      = Column(Integer, nullable=False, default=5)   # 1-5 stars
+    text        = Column(Text, nullable=False)
+    status      = Column(String(20), default="approved", index=True)        # approved | pending | rejected
+    created_at  = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationship to get customer details (string to prevent circular imports)
+    customer = relationship("User")
 

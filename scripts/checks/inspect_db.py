@@ -1,4 +1,11 @@
-import app.models.delivery  # ensure all relationships registered
+import app.models.user
+import app.models.subscription
+import app.models.menu
+import app.models.credit
+import app.models.settings
+import app.models.marketing
+import app.models.audit_log
+import app.models.delivery
 from app.database import SessionLocal
 from app.models.user import User
 from app.models.subscription import Subscription
@@ -14,7 +21,7 @@ print(f'User: id={u.id}  name={u.full_name}  role={u.role}')
 
 subs = db.query(Subscription).filter(Subscription.customer_id == u.id).all()
 for s in subs:
-    print(f'  Sub: id={s.id}  tier_id={s.tier_id}  status={s.status}  '
+    print(f'  Sub: id={s.id}  menu_id={s.menu_id}  '
           f'start={s.start_date}  end={s.end_date}')
 
 # ── Meal tiers ─────────────────────────────────────────────────────

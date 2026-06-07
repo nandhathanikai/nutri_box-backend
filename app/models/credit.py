@@ -7,9 +7,9 @@ class DeliveryCancellation(Base):
     __tablename__ = "delivery_cancellations"
 
     id              = Column(Integer, primary_key=True, index=True)
-    user_id         = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=False)
-    delivery_date   = Column(Date, nullable=False)
+    user_id         = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=False, index=True)
+    delivery_date   = Column(Date, nullable=False, index=True)
     session         = Column(String(50), nullable=False)
     cancelled_at    = Column(DateTime, nullable=False)
     cutoff_deadline = Column(DateTime, nullable=False)
@@ -25,9 +25,9 @@ class Credit(Base):
     __tablename__ = "credits"
 
     id                    = Column(Integer, primary_key=True, index=True)
-    user_id               = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    subscription_id       = Column(Integer, ForeignKey("subscriptions.id"), nullable=True)
-    cancellation_id       = Column(Integer, ForeignKey("delivery_cancellations.id"), nullable=True)
+    user_id               = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id       = Column(Integer, ForeignKey("subscriptions.id"), nullable=True, index=True)
+    cancellation_id       = Column(Integer, ForeignKey("delivery_cancellations.id"), nullable=True, index=True)
 
     # Session & date info
     session               = Column(String(50), nullable=False)          # BF, LUNCH, DINNER, SNACK

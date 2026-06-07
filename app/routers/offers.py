@@ -7,7 +7,7 @@ from datetime import date
 from app.database import get_db
 from app.models.marketing import Offer
 from app.models.subscription import Subscription
-from app.routers.auth import require_admin, get_current_user
+from app.routers.auth import require_admin, get_current_user, get_current_user_optional
 from app.models.user import User
 
 router = APIRouter(prefix="/api/offers", tags=["Offers"])
@@ -78,11 +78,23 @@ def _auto_expire(db: Session):
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=List[OfferResponse])
-def list_offers(status: Optional[str] = None, db: Session = Depends(get_db)):
+def list_offers(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     _auto_expire(db)
     q = db.query(Offer)
-    if status:
+    
+    # Check if user is admin
+    is_admin = current_user and current_user.role and current_user.role.lower() == "admin"
+    
+    if not is_admin:
+        # Customers and unauthenticated users can only see active offers
+        q = q.filter(Offer.status == "active")
+    elif status:
         q = q.filter(Offer.status == status)
+        
     return q.order_by(Offer.id.desc()).all()
 
 @router.post("", response_model=OfferResponse, dependencies=admin_only)
@@ -172,7 +184,11 @@ def validate_offer(req: OfferValidateRequest, db: Session = Depends(get_db)):
     }
 
 @router.post("/{offer_id}/redeem")
-def redeem_offer(offer_id: int, db: Session = Depends(get_db)):
+def redeem_offer(
+    offer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """Increment the used_count on successful order placement."""
     offer = db.query(Offer).filter(Offer.id == offer_id).first()
     if not offer:

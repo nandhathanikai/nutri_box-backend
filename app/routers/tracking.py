@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, SessionLocal
 from app.models.user import User
-from app.models.delivery import DeliveryAssignment, DeliveryTracking, DriverStatus
+from app.models.delivery import DeliveryAssignment, DeliveryTracking, DriverStatus, DeliverySession
 from app.routers.auth import get_current_user
 from app.utils.ws_manager import ws_manager
 
@@ -179,8 +179,12 @@ async def track_ws(
             await websocket.close(code=4004)
             return
 
-        # Customers can only track their own deliveries
-        if user.role == "customer" and assignment.customer_id != user.id:
+        # Access control: only customer, driver, or admin can track this assignment
+        is_admin = user.role and user.role.lower() == "admin"
+        is_assigned_driver = user.role and user.role.lower() == "driver" and assignment.driver_id == user.id
+        is_customer = user.role and user.role.lower() == "customer" and assignment.customer_id == user.id
+
+        if not (is_admin or is_assigned_driver or is_customer):
             await websocket.close(code=4003)
             return
 
@@ -190,7 +194,7 @@ async def track_ws(
         ds = db.query(DriverStatus).filter(DriverStatus.driver_id == assignment.driver_id).first()
         await websocket.send_text(json.dumps({
             "type": "initial_status",
-            "assignment_id": assignment_id,
+            "assignment_id": str(assignment_id),
             "status": assignment.status,
             "driver_latitude": ds.last_latitude if ds else None,
             "driver_longitude": ds.last_longitude if ds else None,
@@ -319,6 +323,40 @@ async def sync_offline_locations(
     return {"saved": saved}
 
 
+@router.get("/api/tracking/active")
+def get_active_assignments(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Customer REST endpoint — returns today's active assignments."""
+    from datetime import timedelta, timezone
+    IST = timezone(timedelta(hours=5, minutes=30))
+    today = datetime.now(IST).date()
+
+    assignments = (
+        db.query(DeliveryAssignment)
+        .filter(
+            DeliveryAssignment.customer_id == current_user.id,
+            DeliveryAssignment.delivery_date == today,
+            DeliveryAssignment.status.in_(["assigned", "on_the_way"])
+        )
+        .all()
+    )
+
+    result = []
+    for a in assignments:
+        sess = db.query(DeliverySession).filter(DeliverySession.id == a.session_id).first()
+        result.append({
+            "assignment_id": str(a.id),
+            "status": a.status,
+            "session_name": sess.name if sess else "—",
+            "session_slug": sess.slug if sess else "—",
+            "started_at": a.started_at.isoformat() if a.started_at else None,
+            "delivered_at": a.delivered_at.isoformat() if a.delivered_at else None,
+        })
+    return result
+
+
 @router.get("/api/tracking/{assignment_id}")
 def get_tracking_status(
     assignment_id: int,
@@ -332,12 +370,17 @@ def get_tracking_status(
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found.")
 
-    # Customers can only see their own deliveries
-    if current_user.role == "customer" and assignment.customer_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not your delivery.")
+    # Access control: only customer, driver, or admin can track this assignment
+    is_admin = current_user.role and current_user.role.lower() == "admin"
+    is_assigned_driver = current_user.role and current_user.role.lower() == "driver" and assignment.driver_id == current_user.id
+    is_customer = current_user.role and current_user.role.lower() == "customer" and assignment.customer_id == current_user.id
+
+    if not (is_admin or is_assigned_driver or is_customer):
+        raise HTTPException(status_code=403, detail="Unauthorized to track this assignment.")
 
     ds = db.query(DriverStatus).filter(DriverStatus.driver_id == assignment.driver_id).first()
     driver = db.query(User).filter(User.id == assignment.driver_id).first()
+    customer = db.query(User).filter(User.id == assignment.customer_id).first()
 
     # Last tracking point for ETA calculation
     last_point = (
@@ -347,8 +390,16 @@ def get_tracking_status(
         .first()
     )
 
+    customer_address = ""
+    if customer:
+        address_parts = []
+        if customer.address_line_1: address_parts.append(customer.address_line_1)
+        if customer.address_line_2: address_parts.append(customer.address_line_2)
+        if customer.landmark: address_parts.append(f"Near {customer.landmark}")
+        customer_address = ", ".join(address_parts) if address_parts else "—"
+
     return {
-        "assignment_id": assignment_id,
+        "assignment_id": str(assignment_id),
         "status": assignment.status,
         "driver_name": driver.full_name if driver else "—",
         "driver_phone": driver.phone if driver else "—",
@@ -356,4 +407,9 @@ def get_tracking_status(
         "driver_longitude": last_point.longitude if last_point else None,
         "last_updated": last_point.recorded_at.isoformat() if last_point else None,
         "delivered_at": assignment.delivered_at.isoformat() if assignment.delivered_at else None,
+        "customer_name": customer.full_name if customer else "—",
+        "customer_phone": customer.phone if customer else "—",
+        "customer_address": customer_address,
+        "customer_latitude": customer.latitude if customer else None,
+        "customer_longitude": customer.longitude if customer else None,
     }

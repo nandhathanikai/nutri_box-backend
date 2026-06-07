@@ -26,6 +26,8 @@ from app.models.meal_tier import MealTier
 from app.models.menu import PlanTemplate
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.models.credit import Credit
+from app.utils.credits import get_last_credit_delivery_date
 from app.routers.auth import get_current_user
 from app.routers.menu import MEAL_COUNT_MAP, DURATION_WORKING_DAYS, _get_current_price
 from app.routers.subscriptions import (
@@ -61,6 +63,7 @@ class CreateOrderRequest(BaseModel):
     diet_type:  str
     slot_combo: str
     duration:   str
+    promo_code: Optional[str] = None
 
 
 class CreateOrderResponse(BaseModel):
@@ -82,6 +85,7 @@ class VerifyRequest(BaseModel):
     slot_combo: str
     duration:   str
     start_date: Optional[date] = None
+    promo_code: Optional[str] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -147,6 +151,40 @@ def create_order(
     delivery_per_meal = float(tier.delivery_charge_weekly if payload.duration == "weekly" else tier.delivery_charge_monthly or 0)
     delivery = round(delivery_per_meal * meal_count, 2)
     amount_inr = round(ppm * meal_count + delivery, 2)
+
+    # Apply promo code discount if provided
+    discount = 0
+    if payload.promo_code:
+        from app.models.marketing import Offer
+        from app.routers.offers import _auto_expire
+        _auto_expire(db)
+        today = date.today()
+        offer = db.query(Offer).filter(
+            Offer.code == payload.promo_code.strip().upper(),
+            Offer.status == "active",
+            Offer.valid_from <= today,
+            Offer.valid_until >= today
+        ).first()
+        
+        if not offer:
+            raise HTTPException(status_code=400, detail="Invalid or expired promo code.")
+        if offer.usage_limit and offer.used_count >= offer.usage_limit:
+            raise HTTPException(status_code=400, detail="This promo code has reached its usage limit.")
+        if amount_inr < offer.min_order:
+            raise HTTPException(status_code=400, detail=f"Minimum order value ₹{offer.min_order} required for this promo code.")
+
+        # Calculate discount
+        if offer.type == "pct":
+            discount = int(amount_inr * offer.value / 100)
+            if offer.max_cap:
+                discount = min(discount, offer.max_cap)
+        elif offer.type == "flat":
+            discount = min(offer.value, int(amount_inr))
+        else:  # free delivery
+            discount = min(int(delivery), offer.max_cap or 40)
+
+        amount_inr = max(0.0, amount_inr - discount)
+
     amount_paise = int(round(amount_inr * 100))  # Razorpay expects paise
 
     rzp = _rzp_client()
@@ -164,6 +202,7 @@ def create_order(
             "diet_type":  payload.diet_type,
             "slot_combo": payload.slot_combo,
             "duration":   payload.duration,
+            "promo_code": payload.promo_code.strip().upper() if payload.promo_code else "",
         },
     })
 
@@ -188,6 +227,7 @@ def _create_subscription_from_payment(
     razorpay_order_id: str,
     razorpay_payment_id: str,
     requested_start: Optional[date] = None,
+    promo_code: Optional[str] = None,
 ) -> Subscription:
     """Idempotently create a subscription for a verified payment.
 
@@ -233,7 +273,18 @@ def _create_subscription_from_payment(
     )
     plan = _resolve_plan(sub_req, db)
 
+    # Squeeze logic: new plan starts after the last scheduled credit delivery
+    scheduled_credits = db.query(Credit).filter(
+        Credit.user_id == user_id,
+        Credit.status == 'scheduled'
+    ).all()
+    earliest_start = get_last_credit_delivery_date(scheduled_credits, today)
+    if scheduled_credits:
+        earliest_start = earliest_start + timedelta(days=1)
+
     start_seed = requested_start or (today + timedelta(days=1))
+    if start_seed < earliest_start:
+        start_seed = earliest_start
     if start_seed < today:
         start_seed = today + timedelta(days=1)
 
@@ -255,6 +306,16 @@ def _create_subscription_from_payment(
         razorpay_payment_id=razorpay_payment_id,
     )
     db.add(sub)
+
+    # Increment promo code usage if applied
+    if promo_code:
+        from app.models.marketing import Offer
+        offer = db.query(Offer).filter(Offer.code == promo_code.strip().upper()).first()
+        if offer:
+            offer.used_count += 1
+            if offer.usage_limit and offer.used_count >= offer.usage_limit:
+                offer.status = "expired"
+
     try:
         db.commit()
     except Exception:
@@ -299,6 +360,7 @@ def verify_payment(
         razorpay_order_id=payload.razorpay_order_id,
         razorpay_payment_id=payload.razorpay_payment_id,
         requested_start=payload.start_date,
+        promo_code=payload.promo_code,
     )
     return _serialize(sub, db)
 
@@ -363,6 +425,7 @@ async def razorpay_webhook(
         diet_type  = notes["diet_type"]
         slot_combo = notes["slot_combo"]
         duration   = notes["duration"]
+        promo_code = notes.get("promo_code")
     except (KeyError, TypeError, ValueError) as e:
         logger.error("Webhook payload missing required fields: %s", e)
         # 200 because we don't want infinite retries on malformed Razorpay data;
@@ -379,6 +442,7 @@ async def razorpay_webhook(
             duration=duration,
             razorpay_order_id=order_id,
             razorpay_payment_id=payment_id,
+            promo_code=promo_code,
         )
     except HTTPException as e:
         # 409 overlap: a different sub already covers this user. Log and ack.

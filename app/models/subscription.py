@@ -8,8 +8,8 @@ class Subscription(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     customer_id = Column(Integer, ForeignKey("users.id"), index=True)
     menu_id = Column(UUID(as_uuid=True), ForeignKey("plan_templates.id"), index=True)
-    start_date = Column(Date)
-    end_date = Column(Date)
+    start_date = Column(Date, index=True)
+    end_date = Column(Date, index=True)
     price_per_meal_snapshot = Column(Numeric(8, 2), nullable=True) # For price history
 
     # Razorpay payment references (nullable for legacy/manually-created subs).

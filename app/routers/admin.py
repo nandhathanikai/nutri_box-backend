@@ -395,41 +395,50 @@ def get_reports(period: str = "week", db: Session = Depends(get_db)):
         "revenue": f"₹{int(item[2] or 0):,}"
     } for item in top_items_data]
 
+    # Fetch all daily revenues since start_date in a single query
+    rev_rows = db.query(
+        Subscription.start_date,
+        func.sum(PlanTemplate.price)
+    ).join(Subscription, Subscription.menu_id == PlanTemplate.id).filter(
+        Subscription.start_date >= start_date
+    ).group_by(Subscription.start_date).all()
+    
+    rev_by_day = {row[0]: float(row[1]) if row[1] else 0.0 for row in rev_rows}
+
     chart_labels = []
     chart_values = []
 
     if period == "week":
         for d in range(6, -1, -1):
             day = today - timedelta(days=d)
-            day_rev = db.query(func.sum(PlanTemplate.price)).join(
-                Subscription, Subscription.menu_id == PlanTemplate.id
-            ).filter(Subscription.start_date == day).scalar()
             chart_labels.append(day.strftime("%a"))
-            chart_values.append(float(day_rev) if day_rev else 0.0)
+            chart_values.append(rev_by_day.get(day, 0.0))
     elif period == "month":
         for w in range(3, -1, -1):
             w_start = start_date + timedelta(days=w * 7)
             w_end = w_start + timedelta(days=7)
-            w_rev = db.query(func.sum(PlanTemplate.price)).join(
-                Subscription, Subscription.menu_id == PlanTemplate.id
-            ).filter(
-                Subscription.start_date >= w_start,
-                Subscription.start_date < w_end
-            ).scalar()
+            
+            w_rev = 0.0
+            cur_d = w_start
+            while cur_d < w_end:
+                w_rev += rev_by_day.get(cur_d, 0.0)
+                cur_d += timedelta(days=1)
+                
             chart_labels.append(f"Wk{4 - w}")
-            chart_values.append(float(w_rev) if w_rev else 0.0)
+            chart_values.append(w_rev)
     else:
         for m in range(2, -1, -1):
             m_start = start_date + relativedelta(months=2 - m)
             m_end = m_start + relativedelta(months=1)
-            m_rev = db.query(func.sum(PlanTemplate.price)).join(
-                Subscription, Subscription.menu_id == PlanTemplate.id
-            ).filter(
-                Subscription.start_date >= m_start,
-                Subscription.start_date < m_end
-            ).scalar()
+            
+            m_rev = 0.0
+            cur_d = m_start
+            while cur_d < m_end:
+                m_rev += rev_by_day.get(cur_d, 0.0)
+                cur_d += timedelta(days=1)
+                
             chart_labels.append(m_start.strftime("%b"))
-            chart_values.append(float(m_rev) if m_rev else 0.0)
+            chart_values.append(m_rev)
 
     user_counts = db.query(
         Subscription.customer_id,

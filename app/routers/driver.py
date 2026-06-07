@@ -103,14 +103,15 @@ def get_my_deliveries(
             if cust.landmark: address_parts.append(f"Near {cust.landmark}")
 
         delivery_row = {
-            "assignment_id": a.id,
-            "subscription_id": a.subscription_id,
-            "customer_id": a.customer_id,
+            "assignment_id": str(a.id),
+            "subscription_id": str(a.subscription_id),
+            "customer_id": str(a.customer_id),
             "customer_name": cust.full_name if cust else "—",
             "customer_phone": cust.phone if cust else "—",
             "address": ", ".join(address_parts) if address_parts else "—",
             "latitude": cust.latitude if cust else None,
             "longitude": cust.longitude if cust else None,
+            "location_link": cust.location_link if cust else None,
             "tier_name": tier.name if tier else "—",
             "tier_slug": tier.slug if (tier and hasattr(tier, "slug")) else "basic",
             "plan_name": plan.name if plan else "—",
@@ -123,7 +124,7 @@ def get_my_deliveries(
 
         if sess.id not in session_groups:
             session_groups[sess.id] = {
-                "session_id": sess.id,
+                "session_id": str(sess.id),
                 "session_name": sess.name,
                 "slug": sess.slug,
                 "display_order": sess.display_order,
@@ -181,7 +182,7 @@ async def start_delivery(
     # Broadcast status change to any listening customers
     await ws_manager.broadcast_status_change(assignment_id, "on_the_way")
 
-    return {"assignment_id": assignment_id, "status": "on_the_way"}
+    return {"assignment_id": str(assignment_id), "status": "on_the_way"}
 
 
 # ── Mark Delivered ────────────────────────────────────────────────────────────
@@ -217,7 +218,7 @@ async def mark_delivered(
     # Stop broadcasting — notify customer of completion
     await ws_manager.broadcast_status_change(assignment_id, "delivered")
 
-    return {"assignment_id": assignment_id, "status": "delivered"}
+    return {"assignment_id": str(assignment_id), "status": "delivered"}
 
 
 # ── Driver Status Update ──────────────────────────────────────────────────────
@@ -248,7 +249,7 @@ def update_my_status(
     else:
         db.add(DriverStatus(driver_id=driver.id, status=payload.status))
     db.commit()
-    return {"driver_id": driver.id, "status": payload.status}
+    return {"driver_id": str(driver.id), "status": payload.status}
 
 
 # ── Get route for an assignment (customer coordinates) ────────────────────────
@@ -272,7 +273,7 @@ def get_route_info(
         raise HTTPException(status_code=404, detail="Customer not found.")
 
     return {
-        "assignment_id": assignment_id,
+        "assignment_id": str(assignment_id),
         "customer_name": customer.full_name,
         "customer_phone": customer.phone,
         "address": ", ".join(filter(None, [
@@ -282,5 +283,6 @@ def get_route_info(
         ])),
         "latitude": customer.latitude,
         "longitude": customer.longitude,
+        "location_link": customer.location_link,
         "status": assignment.status,
     }
