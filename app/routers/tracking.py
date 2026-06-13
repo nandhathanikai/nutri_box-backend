@@ -412,4 +412,5 @@ def get_tracking_status(
         "customer_address": customer_address,
         "customer_latitude": customer.latitude if customer else None,
         "customer_longitude": customer.longitude if customer else None,
+        "customer_location_link": customer.location_link if customer else None,
     }

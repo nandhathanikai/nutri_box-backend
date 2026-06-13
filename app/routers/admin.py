@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from pydantic import BaseModel, EmailStr, validator
 from typing import Optional
 from app.database import get_db
@@ -27,7 +27,93 @@ IST = timezone(timedelta(hours=5, minutes=30))
 def _today_ist() -> date:
     return datetime.now(IST).date()
 
+
+def check_database_status(db: Session) -> dict:
+    """Helper to check current database size, connection counts, and free tier limits."""
+    import os
+    db_url = os.getenv("DATABASE_URL", "")
+
+    # Check env variables for overrides
+    size_limit_mb = float(os.getenv("DATABASE_SIZE_LIMIT_MB", 0))
+    conn_limit = int(os.getenv("DATABASE_CONN_LIMIT", 0))
+
+    # Auto-detect defaults based on DB URL host/provider
+    if size_limit_mb <= 0:
+        if "supabase" in db_url:
+            size_limit_mb = 500.0  # Supabase free storage limit: 500 MB
+        elif "cockroach" in db_url or "crdb" in db_url:
+            size_limit_mb = 10240.0  # CockroachDB Serverless free storage limit: 10 GB (10240 MB)
+        else:
+            size_limit_mb = 1000.0  # Render PG free storage limit: 1 GB (1000 MB)
+
+    if conn_limit <= 0:
+        if "supabase" in db_url:
+            conn_limit = 60
+        elif "cockroach" in db_url or "crdb" in db_url:
+            conn_limit = 4000
+        else:
+            conn_limit = 97  # Render PG free connection limit: 97
+
+    size_mb = 0.0
+    conn_count = 0
+    size_error = None
+    conn_error = None
+
+    # 1. Query current database size
+    try:
+        size_bytes = db.execute(text("SELECT pg_database_size(current_database())")).scalar()
+        if size_bytes is not None:
+            size_mb = round(size_bytes / (1024 * 1024), 2)
+    except Exception as e:
+        logger.warning("Failed to query pg_database_size: %s", e)
+        size_error = str(e)
+
+    # 2. Query connection count
+    try:
+        conn_count = db.execute(text("SELECT count(*) FROM pg_stat_activity")).scalar() or 0
+    except Exception as e:
+        logger.warning("Failed to query pg_stat_activity: %s", e)
+        conn_error = str(e)
+        conn_count = 1  # Fallback to current connection
+
+    size_percentage = round((size_mb / size_limit_mb) * 100, 2) if size_limit_mb > 0 else 0
+    conn_percentage = round((conn_count / conn_limit) * 100, 2) if conn_limit > 0 else 0
+
+    # Flag limit-reached alerts at >= 90% utilization
+    size_limit_reached = size_percentage >= 90.0
+    conn_limit_reached = conn_percentage >= 90.0
+
+    db_type = "CockroachDB"
+    if "supabase" in db_url:
+        db_type = "Supabase"
+    elif "render" in db_url:
+        db_type = "Render PostgreSQL"
+    elif "postgresql" in db_url:
+        db_type = "PostgreSQL"
+
+    return {
+        "database_type": db_type,
+        "size_mb": size_mb,
+        "size_limit_mb": size_limit_mb,
+        "size_percentage": size_percentage,
+        "size_limit_reached": size_limit_reached,
+        "size_error": size_error,
+        "connections": conn_count,
+        "connection_limit": conn_limit,
+        "connection_percentage": conn_percentage,
+        "connection_limit_reached": conn_limit_reached,
+        "connection_error": conn_error,
+        "any_limit_reached": size_limit_reached or conn_limit_reached
+    }
+
+
 router = APIRouter(tags=["Admin"], dependencies=[Depends(require_admin)])
+
+
+@router.get("/db-status")
+def get_db_status(db: Session = Depends(get_db)):
+    """Retrieve database resource utilization and limits (size/connections)."""
+    return check_database_status(db)
 
 
 @router.get("/dashboard-stats")
@@ -102,6 +188,8 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         cancel_dict.get('snack', 0),
     ]
 
+    db_status = check_database_status(db)
+
     return {
         "activeCustomers": active_customers,
         "monthlyRevenue": monthly_revenue_str,
@@ -114,7 +202,8 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "cancellationsBySession": {
             "labels": cancel_labels,
             "data": cancel_data
-        }
+        },
+        "dbStatus": db_status
     }
 
 

@@ -24,7 +24,7 @@ from app.models import marketing as marketing_models  # noqa: F401  registers An
 from app.models import audit_log as audit_log_models  # noqa: F401  registers AuditLog
 from app.models import custom_request as custom_request_models  # noqa: F401 registers CustomPlanRequest
 from app.models import delivery as delivery_models  # noqa: F401  registers DeliverySession, DeliveryAssignment, DeliveryTracking, DriverStatus
-from app.routers import auth, admin, menu, settings, reviews
+from app.routers import auth, admin, menu, settings, reviews, chatbot
 from app.routers import announcements as announcements_router
 from app.routers import offers as offers_router
 from app.routers import subscriptions as subscriptions_router
@@ -121,6 +121,7 @@ app.include_router(delivery_router.router)
 app.include_router(driver_router.router)
 app.include_router(tracking_router.router)
 app.include_router(reviews.router)
+app.include_router(chatbot.router)
 
 
 
