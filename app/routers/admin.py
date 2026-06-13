@@ -10,7 +10,7 @@ from app.models.subscription import Subscription
 from app.models.menu import PlanTemplate
 from app.models.meal_tier import MealTier
 from app.models.credit import DeliveryCancellation, Credit
-from app.models.marketing import Offer
+from app.models.marketing import Offer, Review
 from app.models.audit_log import AuditLog
 from app.routers.auth import require_admin, get_current_user
 from app.utils.security import get_password_hash
@@ -706,6 +706,9 @@ def delete_customer(
 
     # Disassociate subscriptions to satisfy the foreign key constraint and preserve records
     db.query(Subscription).filter(Subscription.customer_id == user_id).update({Subscription.customer_id: None})
+
+    # Delete reviews to satisfy the foreign key constraint and clean up
+    db.query(Review).filter(Review.customer_id == user_id).delete(synchronize_session=False)
 
     db.delete(target)
     db.add(AuditLog(
