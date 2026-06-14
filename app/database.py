@@ -37,10 +37,17 @@ def get_db():
 
 
 def test_connection():
-    """Verify database connectivity at startup."""
+    """Verify database connectivity at startup and run manual schema migrations."""
     try:
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version()"))
             logger.info("DB Connected! CockroachDB version: %s", result.fetchone()[0])
+            
+            # Manual schema migration for subscriptions table
+            conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS customization_details VARCHAR;"))
+            conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS diet_type VARCHAR;"))
+            conn.execute(text("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS slot_combo VARCHAR;"))
+            conn.commit()
+            logger.info("Database schema upgrades checked & applied successfully.")
     except Exception as e:
-        logger.error("DB Connection failed: %s", e)
+        logger.error("DB Connection or schema migration failed: %s", e)

@@ -47,6 +47,7 @@ class SubscriptionOut(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     status: str  # active | expiring | expired
+    customization_details: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -120,17 +121,18 @@ def _serialize(
     return SubscriptionOut(
         id=sub.id,
         plan_id=str(sub.menu_id) if sub.menu_id else None,
-        plan_name=plan.name if plan else None,
-        tier_name=tier.name if tier else None,
-        diet_type=plan.diet_type if plan else None,
-        slot_combo=plan.slot_combo if plan else None,
-        duration=plan.duration if plan else None,
-        meal_count=plan.meal_count if plan else None,
+        plan_name=plan.name if plan else ("Customized Plan" if sub.customization_details else None),
+        tier_name=tier.name if tier else ("Customized Tier" if sub.customization_details else None),
+        diet_type=sub.diet_type if sub.diet_type else (plan.diet_type if plan else None),
+        slot_combo=sub.slot_combo if sub.slot_combo else (plan.slot_combo if plan else None),
+        duration=plan.duration if plan else ("monthly" if sub.customization_details else None),
+        meal_count=plan.meal_count if plan else (24 if sub.customization_details else None),
         price_per_meal=price_per_meal,
         total_price=total_price,
         start_date=sub.start_date,
         end_date=sub.end_date,
         status=status,
+        customization_details=sub.customization_details,
     )
 
 

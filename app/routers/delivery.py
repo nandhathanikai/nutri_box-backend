@@ -376,7 +376,7 @@ def get_delivery_orders(db: Session = Depends(get_db)):
         plan = plans.get(sub.menu_id) if sub.menu_id else None
         tier = tiers.get(plan.tier_id) if (plan and plan.tier_id) else None
 
-        slot_combo = (plan.slot_combo if plan else None) or ""
+        slot_combo = sub.slot_combo or (plan.slot_combo if plan else None) or ""
         applicable_slugs = SLOT_TO_SESSIONS.get(slot_combo, [])
 
         address_parts = []
@@ -404,14 +404,15 @@ def get_delivery_orders(db: Session = Depends(get_db)):
                 "address": address,
                 "latitude": user.latitude if user else None,
                 "longitude": user.longitude if user else None,
-                "tier_name": tier.name if tier else "—",
-                "plan_name": plan.name if plan else "—",
-                "diet_type": plan.diet_type if plan else "—",
+                "tier_name": tier.name if tier else "Customized Tier",
+                "plan_name": plan.name if plan else "Customized Plan",
+                "diet_type": sub.diet_type or (plan.diet_type if plan else "both"),
                 "session_slug": slug,
                 "assignment_id": str(assignment.id) if assignment else None,
                 "assignment_status": assignment.status if assignment else "unassigned",
                 "driver_id": str(driver.id) if driver else None,
                 "driver_name": driver.full_name if driver else None,
+                "customization_details": sub.customization_details,
             }
 
             if cancellation:

@@ -41,7 +41,7 @@ class AnnouncementResponse(BaseModel):
     opens:      int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

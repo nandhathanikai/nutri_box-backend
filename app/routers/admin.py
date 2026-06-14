@@ -33,23 +33,31 @@ def check_database_status(db: Session) -> dict:
     import os
     db_url = os.getenv("DATABASE_URL", "")
 
+    db_type = "CockroachDB"
+    if "supabase" in db_url:
+        db_type = "Supabase"
+    elif "render" in db_url:
+        db_type = "Render PostgreSQL"
+    elif "postgresql" in db_url:
+        db_type = "PostgreSQL"
+
     # Check env variables for overrides
     size_limit_mb = float(os.getenv("DATABASE_SIZE_LIMIT_MB", 0))
     conn_limit = int(os.getenv("DATABASE_CONN_LIMIT", 0))
 
     # Auto-detect defaults based on DB URL host/provider
     if size_limit_mb <= 0:
-        if "supabase" in db_url:
+        if db_type == "Supabase":
             size_limit_mb = 500.0  # Supabase free storage limit: 500 MB
-        elif "cockroach" in db_url or "crdb" in db_url:
+        elif db_type == "CockroachDB":
             size_limit_mb = 10240.0  # CockroachDB Serverless free storage limit: 10 GB (10240 MB)
         else:
             size_limit_mb = 1000.0  # Render PG free storage limit: 1 GB (1000 MB)
 
     if conn_limit <= 0:
-        if "supabase" in db_url:
+        if db_type == "Supabase":
             conn_limit = 60
-        elif "cockroach" in db_url or "crdb" in db_url:
+        elif db_type == "CockroachDB":
             conn_limit = 4000
         else:
             conn_limit = 97  # Render PG free connection limit: 97
@@ -60,21 +68,52 @@ def check_database_status(db: Session) -> dict:
     conn_error = None
 
     # 1. Query current database size
-    try:
-        size_bytes = db.execute(text("SELECT pg_database_size(current_database())")).scalar()
-        if size_bytes is not None:
-            size_mb = round(size_bytes / (1024 * 1024), 2)
-    except Exception as e:
-        logger.warning("Failed to query pg_database_size: %s", e)
-        size_error = str(e)
+    if db_type == "CockroachDB":
+        try:
+            # Estimate database size in CockroachDB using SHOW TABLES row count estimates
+            tables = db.execute(text("SHOW TABLES")).all()
+            total_rows = 0
+            for t in tables:
+                try:
+                    total_rows += int(t._mapping.get('estimated_row_count', 0) or 0)
+                except Exception:
+                    pass
+            # Estimate average 5KB per row (including index overhead)
+            size_mb = round((total_rows * 5.0) / 1024, 2)
+            if size_mb < 0.1:
+                size_mb = 0.1
+        except Exception as e:
+            logger.warning("Failed to estimate CockroachDB size: %s", e)
+            size_error = str(e)
+            db.rollback()
+            size_mb = 0.1
+    else:
+        try:
+            size_bytes = db.execute(text("SELECT pg_database_size(current_database())")).scalar()
+            if size_bytes is not None:
+                size_mb = round(size_bytes / (1024 * 1024), 2)
+        except Exception as e:
+            logger.warning("Failed to query pg_database_size: %s", e)
+            size_error = str(e)
+            db.rollback()
 
     # 2. Query connection count
-    try:
-        conn_count = db.execute(text("SELECT count(*) FROM pg_stat_activity")).scalar() or 0
-    except Exception as e:
-        logger.warning("Failed to query pg_stat_activity: %s", e)
-        conn_error = str(e)
-        conn_count = 1  # Fallback to current connection
+    if db_type == "CockroachDB":
+        try:
+            conn_count = len(db.execute(text("SHOW SESSIONS")).all())
+        except Exception as e:
+            logger.warning("Failed to query CockroachDB SHOW SESSIONS: %s", e)
+            conn_error = str(e)
+            db.rollback()
+            conn_count = 1
+    else:
+        try:
+            conn_count = db.execute(text("SELECT count(*) FROM pg_stat_activity")).scalar() or 0
+        except Exception as e:
+            logger.warning("Failed to query pg_stat_activity: %s", e)
+            conn_error = str(e)
+            db.rollback()
+            conn_count = 1  # Fallback to current connection
 
     size_percentage = round((size_mb / size_limit_mb) * 100, 2) if size_limit_mb > 0 else 0
     conn_percentage = round((conn_count / conn_limit) * 100, 2) if conn_limit > 0 else 0
@@ -82,14 +121,6 @@ def check_database_status(db: Session) -> dict:
     # Flag limit-reached alerts at >= 90% utilization
     size_limit_reached = size_percentage >= 90.0
     conn_limit_reached = conn_percentage >= 90.0
-
-    db_type = "CockroachDB"
-    if "supabase" in db_url:
-        db_type = "Supabase"
-    elif "render" in db_url:
-        db_type = "Render PostgreSQL"
-    elif "postgresql" in db_url:
-        db_type = "PostgreSQL"
 
     return {
         "database_type": db_type,
@@ -386,7 +417,7 @@ def get_todays_orders(db: Session = Depends(get_db)):
 
         # Determine which sessions are due today based on slot_combo
         session_keys: list[str] = []
-        slot_combo = (plan.slot_combo if plan else None) or ""
+        slot_combo = sub.slot_combo or (plan.slot_combo if plan else None) or ""
         if slot_combo in ("breakfast_only", "both"):
             session_keys.append("BF")
         if slot_combo in ("dinner_only", "both"):
@@ -410,11 +441,12 @@ def get_todays_orders(db: Session = Depends(get_db)):
                 "customer_email": user.email if user else "",
                 "customer_phone": (user.phone if user and user.phone else "—"),
                 "address": address,
-                "tier_name": (tier.name if tier else "—"),
-                "plan_name": (plan.name if plan and plan.name else (tier.name if tier else "Plan")),
-                "diet_type": (plan.diet_type if plan else "—"),
+                "tier_name": (tier.name if tier else "Customized Tier"),
+                "plan_name": (plan.name if plan and plan.name else "Customized Plan"),
+                "diet_type": sub.diet_type or (plan.diet_type if plan else "both"),
                 "session_key": sk,
                 "session_label": SESSION_LABELS.get(sk, sk),
+                "customization_details": sub.customization_details,
             }
 
             cancellation = cancel_map.get((sub.id, sk))
@@ -579,6 +611,7 @@ class AdminUserCreate(BaseModel):
     role: str = "customer"        # 'customer' | 'admin'
     plan_id: Optional[str] = None
     subscription_start_date: Optional[date] = None
+    customization_details: Optional[str] = None
 
     @validator("role")
     def _valid_role(cls, v: str):
@@ -619,7 +652,8 @@ def admin_create_user(
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
     plan = None
-    if payload.plan_id:
+    is_customized = payload.plan_id == "customize"
+    if payload.plan_id and not is_customized:
         plan = db.query(PlanTemplate).filter(PlanTemplate.id == payload.plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Plan combination not found.")
@@ -639,28 +673,43 @@ def admin_create_user(
     db.commit()
     db.refresh(new_user)
 
-    if plan:
+    if payload.plan_id:
         from app.routers.subscriptions import _next_working_day, _last_delivery_date
 
         start = payload.subscription_start_date or date.today()
         # Shift start to next working day if it is a Sunday
         start = _next_working_day(start)
-        end = _last_delivery_date(start, plan.duration or "weekly")
 
-        ppm_snapshot = None
-        if plan.meal_count and plan.price:
-            ppm_snapshot = round(float(plan.price) / plan.meal_count, 2)
+        if not is_customized:
+            end = _last_delivery_date(start, plan.duration or "weekly")
+
+            ppm_snapshot = None
+            if plan.meal_count and plan.price:
+                ppm_snapshot = round(float(plan.price) / plan.meal_count, 2)
+            else:
+                from app.routers.menu import _get_current_price
+                ppm_snapshot = _get_current_price(str(plan.tier_id), plan.diet_type, db) or None
+
+            new_sub = Subscription(
+                customer_id=new_user.id,
+                menu_id=plan.id,
+                start_date=start,
+                end_date=end,
+                price_per_meal_snapshot=ppm_snapshot,
+            )
         else:
-            from app.routers.menu import _get_current_price
-            ppm_snapshot = _get_current_price(str(plan.tier_id), plan.diet_type, db) or None
+            end = _last_delivery_date(start, "monthly")
 
-        new_sub = Subscription(
-            customer_id=new_user.id,
-            menu_id=plan.id,
-            start_date=start,
-            end_date=end,
-            price_per_meal_snapshot=ppm_snapshot,
-        )
+            new_sub = Subscription(
+                customer_id=new_user.id,
+                menu_id=None,
+                start_date=start,
+                end_date=end,
+                price_per_meal_snapshot=0.0,
+                customization_details=payload.customization_details,
+                diet_type="both",
+                slot_combo="both",
+            )
         db.add(new_sub)
         db.commit()
 

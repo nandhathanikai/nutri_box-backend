@@ -44,7 +44,7 @@ class CustomRequestResponse(BaseModel):
     created_at: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class CustomRequestPricePatch(BaseModel):
     price_per_meal: float

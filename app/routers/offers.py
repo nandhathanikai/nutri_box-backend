@@ -60,7 +60,7 @@ class OfferResponse(BaseModel):
     audience:    str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OfferValidateRequest(BaseModel):
     code:        str
