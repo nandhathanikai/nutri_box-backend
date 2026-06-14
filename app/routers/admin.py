@@ -647,6 +647,12 @@ def admin_create_user(
     Address fields stay optional (admin may add a customer who hasn't given one).
     Optional plan_id and subscription_start_date allow adding a customer with an active subscription.
     """
+    if payload.role == "customer" and not (payload.landmark or "").strip() and not (payload.location_link or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Either Landmark or Live Location is mandatory for customers."
+        )
+
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists.")

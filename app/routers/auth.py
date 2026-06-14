@@ -127,6 +127,12 @@ _signup_limit = rate_limit(max_calls=5, period_seconds=600, scope="signup")
 def signup(user: UserCreate, db: Session = Depends(get_db)):
     validate_password_strength(user.password)
 
+    if not (user.landmark or "").strip() and not (user.location_link or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Either Landmark or Live Location is mandatory."
+        )
+
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
