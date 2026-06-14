@@ -257,8 +257,7 @@ def query_chatbot(req: QueryRequest, current_user: User = Depends(get_current_us
             system_instruction=system_instruction
         )
         
-        chat = model.start_chat()
-        response = chat.send_message(req.question)
+        response = model.generate_content(req.question)
         
         return {
             "answer": response.text,
