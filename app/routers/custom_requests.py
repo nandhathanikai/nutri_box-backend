@@ -30,6 +30,7 @@ class CustomRequestResponse(BaseModel):
     customer_id: int
     customer_name: str
     customer_email: str
+    customer_phone: Optional[str] = None
     base_tier_id: Optional[UUID]
     base_tier_name: Optional[str]
     diet_type: str
@@ -41,6 +42,7 @@ class CustomRequestResponse(BaseModel):
     quoted_delivery_charge: Optional[float]
     quoted_total: Optional[float]
     meal_count: Optional[int]
+    admin_note: Optional[str] = None
     created_at: str
     
     class Config:
@@ -49,6 +51,7 @@ class CustomRequestResponse(BaseModel):
 class CustomRequestPricePatch(BaseModel):
     price_per_meal: float
     delivery_charge: float
+    admin_note: Optional[str] = None
 
 class CustomRequestStatusPatch(BaseModel):
     status: str  # 'accepted', 'rejected'
@@ -147,10 +150,10 @@ def price_custom_request(
         
     req.quoted_price_per_meal = payload.price_per_meal
     req.quoted_delivery_charge = payload.delivery_charge
+    req.admin_note = payload.admin_note
     req.status = "priced"
     
     db.commit()
-    
     return {"message": "Request priced successfully"}
 
 
@@ -263,6 +266,17 @@ def verify_custom_payment(
     import hashlib
     from app.routers.subscriptions import _next_working_day, _last_delivery_date, _serialize
 
+    # Idempotency: check if subscription already exists for this order
+    existing = db.query(Subscription).filter(
+        Subscription.razorpay_order_id == payload.razorpay_order_id
+    ).first()
+    if existing:
+        req_to_del = db.query(CustomPlanRequest).filter(CustomPlanRequest.id == request_id).first()
+        if req_to_del:
+            db.delete(req_to_del)
+            db.commit()
+        return _serialize(existing, db)
+
     req = db.query(CustomPlanRequest).filter(
         CustomPlanRequest.id == request_id,
         CustomPlanRequest.customer_id == current_user.id
@@ -282,15 +296,6 @@ def verify_custom_payment(
     ).hexdigest()
     if not hmaclib.compare_digest(generated, payload.razorpay_signature):
         raise HTTPException(status_code=400, detail="Payment verification failed. Invalid signature.")
-
-    # Idempotency: check if subscription already exists for this order
-    existing = db.query(Subscription).filter(
-        Subscription.razorpay_order_id == payload.razorpay_order_id
-    ).first()
-    if existing:
-        req.status = "paid"
-        db.commit()
-        return {"message": "Payment already recorded", "subscription_id": str(existing.id)}
 
     # Block duplicate active subscriptions
     today = date.today()
@@ -336,8 +341,8 @@ def verify_custom_payment(
     )
     db.add(sub)
 
-    # Mark the custom request as paid
-    req.status = "paid"
+    # Delete the custom plan request from the database on success
+    db.delete(req)
 
     try:
         db.commit()
@@ -382,6 +387,7 @@ def _format_request(req: CustomPlanRequest, user: User, db: Session) -> dict:
         "customer_id": req.customer_id,
         "customer_name": user.full_name if user else "Unknown",
         "customer_email": user.email if user else "Unknown",
+        "customer_phone": user.phone if user else "Unknown",
         "base_tier_id": req.base_tier_id,
         "base_tier_name": tier_name,
         "diet_type": req.diet_type,
@@ -393,5 +399,6 @@ def _format_request(req: CustomPlanRequest, user: User, db: Session) -> dict:
         "quoted_delivery_charge": float(req.quoted_delivery_charge) if req.quoted_delivery_charge is not None else None,
         "quoted_total": quoted_total,
         "meal_count": meal_count,
+        "admin_note": req.admin_note,
         "created_at": req.created_at.isoformat() if req.created_at else None
     }

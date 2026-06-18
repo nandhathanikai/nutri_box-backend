@@ -7,7 +7,7 @@ DeliveryTracking   — GPS breadcrumb trail from driver during an active deliver
 DriverStatus       — Current real-time status of a driver
 """
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, Text,
+    Column, Integer, BigInteger, String, Float, Boolean, Text,
     DateTime, Date, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
@@ -22,7 +22,7 @@ class DeliverySession(Base):
     """
     __tablename__ = "delivery_sessions"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True)
     name = Column(String(50), nullable=False, unique=True)        # Display name: "Breakfast"
     slug = Column(String(50), nullable=False, unique=True)        # Machine key: "breakfast"
     display_order = Column(Integer, default=0, nullable=False)    # Sort order in UI
@@ -45,11 +45,11 @@ class DeliveryAssignment(Base):
         ),
     )
 
-    id = Column(Integer, primary_key=True, index=True)
-    subscription_id = Column(Integer, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True, index=True)
-    customer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    driver_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    session_id = Column(Integer, ForeignKey("delivery_sessions.id"), nullable=False, index=True)
+    id = Column(BigInteger, primary_key=True, index=True)
+    subscription_id = Column(BigInteger, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True, index=True)
+    customer_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    driver_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id = Column(BigInteger, ForeignKey("delivery_sessions.id"), nullable=False, index=True)
     delivery_date = Column(Date, nullable=False, index=True)
 
     # Delivery lifecycle
@@ -75,9 +75,9 @@ class DeliveryTracking(Base):
     """
     __tablename__ = "delivery_tracking"
 
-    id = Column(Integer, primary_key=True, index=True)
-    assignment_id = Column(Integer, ForeignKey("delivery_assignments.id", ondelete="CASCADE"), nullable=False, index=True)
-    driver_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True)
+    assignment_id = Column(BigInteger, ForeignKey("delivery_assignments.id", ondelete="CASCADE"), nullable=False, index=True)
+    driver_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     recorded_at = Column(DateTime(timezone=True), nullable=False)   # Device-side timestamp
@@ -93,12 +93,12 @@ class DriverStatus(Base):
     """
     __tablename__ = "driver_status"
 
-    driver_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    driver_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     status = Column(
         String(20), default="offline", nullable=False
     )  # available | on_delivery | offline
-    current_session_id = Column(Integer, ForeignKey("delivery_sessions.id"), nullable=True)
-    current_assignment_id = Column(Integer, ForeignKey("delivery_assignments.id", ondelete="SET NULL"), nullable=True)
+    current_session_id = Column(BigInteger, ForeignKey("delivery_sessions.id"), nullable=True)
+    current_assignment_id = Column(BigInteger, ForeignKey("delivery_assignments.id", ondelete="SET NULL"), nullable=True)
     last_latitude = Column(Float, nullable=True)
     last_longitude = Column(Float, nullable=True)
     last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

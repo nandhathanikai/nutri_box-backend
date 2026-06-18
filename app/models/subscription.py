@@ -1,12 +1,12 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Numeric
+from sqlalchemy import Column, Integer, BigInteger, String, Date, ForeignKey, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    customer_id = Column(Integer, ForeignKey("users.id"), index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    customer_id = Column(BigInteger, ForeignKey("users.id"), index=True)
     menu_id = Column(UUID(as_uuid=True), ForeignKey("plan_templates.id"), index=True)
     start_date = Column(Date, index=True)
     end_date = Column(Date, index=True)

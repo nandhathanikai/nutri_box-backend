@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Date, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
@@ -7,8 +7,8 @@ class DeliveryCancellation(Base):
     __tablename__ = "delivery_cancellations"
 
     id              = Column(Integer, primary_key=True, index=True)
-    user_id         = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=False, index=True)
+    user_id         = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id = Column(BigInteger, ForeignKey("subscriptions.id"), nullable=False, index=True)
     delivery_date   = Column(Date, nullable=False, index=True)
     session         = Column(String(50), nullable=False)
     cancelled_at    = Column(DateTime, nullable=False)
@@ -25,8 +25,8 @@ class Credit(Base):
     __tablename__ = "credits"
 
     id                    = Column(Integer, primary_key=True, index=True)
-    user_id               = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    subscription_id       = Column(Integer, ForeignKey("subscriptions.id"), nullable=True, index=True)
+    user_id               = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id       = Column(BigInteger, ForeignKey("subscriptions.id"), nullable=True, index=True)
     cancellation_id       = Column(Integer, ForeignKey("delivery_cancellations.id"), nullable=True, index=True)
 
     # Session & date info

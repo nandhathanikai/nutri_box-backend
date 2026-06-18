@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, Float
+from sqlalchemy import Column, Integer, BigInteger, String, Text, Boolean, Float
 from app.database import Base
 
 class AppSettings(Base):
@@ -7,7 +7,7 @@ class AppSettings(Base):
     notification toggles, payment config, credit rules."""
     __tablename__ = "app_settings"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True)
 
     # ── Contact / Footer Info ──────────────────────────────────────────────
     business_name     = Column(String, nullable=True, default="Nutribox Kitchen")

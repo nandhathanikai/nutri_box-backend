@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Text, Date, DateTime, Boolean, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -23,7 +23,7 @@ class Offer(Base):
     """Discount offers / coupon codes."""
     __tablename__ = "offers"
 
-    id          = Column(Integer, primary_key=True, index=True)
+    id          = Column(BigInteger, primary_key=True, index=True)
     code        = Column(String(50), unique=True, nullable=False, index=True)
     description = Column(String(255), nullable=False)
     type        = Column(String(10), nullable=False)   # pct | flat | free
@@ -43,7 +43,7 @@ class GalleryImage(Base):
     """Showcase gallery images uploaded by admin for dashboard display."""
     __tablename__ = "gallery_images"
 
-    id         = Column(Integer, primary_key=True, index=True)
+    id         = Column(BigInteger, primary_key=True, index=True)
     image_url  = Column(String(500), nullable=False)
     caption    = Column(String(255), nullable=True)
     sort_order = Column(Integer, default=0)
@@ -55,7 +55,7 @@ class Review(Base):
     __tablename__ = "reviews"
 
     id          = Column(Integer, primary_key=True, index=True)
-    customer_id = Column(Integer, ForeignKey("users.id"), index=True)
+    customer_id = Column(BigInteger, ForeignKey("users.id"), index=True)
     rating      = Column(Integer, nullable=False, default=5)   # 1-5 stars
     text        = Column(Text, nullable=False)
     status      = Column(String(20), default="approved", index=True)        # approved | pending | rejected
