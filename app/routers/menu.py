@@ -14,14 +14,6 @@ from app.routers.auth import require_admin
 router = APIRouter(prefix="/api/menu", tags=["Menu Management API"])
 admin_only = [Depends(require_admin)]
 
-try:
-    from supabase import create_client, Client
-    SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-    supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-except Exception:
-    supabase_client = None
-
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 # Nutribox delivers Monday–Saturday (Sunday off).
@@ -726,8 +718,8 @@ def copy_week_images(payload: CopyWeekPayload, db: Session = Depends(get_db)):
 
 @router.post("/upload-image", dependencies=admin_only)
 async def upload_image(request: Request, file: UploadFile = File(...)):
-    """Upload image to Supabase storage and return public URL.
-    If Supabase is not configured, falls back to local file storage for local development.
+    """Upload image, video, or PDF file to Cloudinary and return public URL.
+    If Cloudinary is not configured, falls back to local file storage for local development.
 
     On failure, returns a structured detail dict:
       { error_type, message, raw }
@@ -735,48 +727,65 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     """
     import logging
     logger = logging.getLogger(__name__)
-    from app.utils.supabase_errors import classify_supabase_error
 
     # Validate file type and extension early
-    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-    content_type = file.content_type or "image/jpeg"
-    if content_type not in allowed_types:
+    allowed_types = {
+        # Images
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml", "image/bmp",
+        # Videos
+        "video/mp4", "video/webm", "video/quicktime", "video/ogg", "video/x-matroska", "video/avi",
+        # PDF
+        "application/pdf"
+    }
+    content_type = file.content_type or ""
+    filename_lower = (file.filename or "").lower()
+    ext = filename_lower.split(".")[-1] if filename_lower and "." in filename_lower else ""
+
+    allowed_extensions = {
+        # Images
+        "jpg", "jpeg", "png", "webp", "gif", "svg", "bmp",
+        # Videos
+        "mp4", "webm", "mov", "ogg", "mkv", "avi", "flv",
+        # PDF
+        "pdf"
+    }
+
+    if content_type not in allowed_types and ext not in allowed_extensions:
         raise HTTPException(
             status_code=415,
             detail={
                 "error_type": "invalid_file_type",
-                "message": f"Unsupported file type '{content_type}'. Please upload a JPEG, PNG, or WebP image.",
-                "raw": f"content_type={content_type}",
+                "message": f"Unsupported file type '{content_type}' or extension '.{ext}'. Please upload an image, video, or PDF.",
+                "raw": f"content_type={content_type}, extension={ext}",
             },
         )
 
-    # Validate filename extension strictly
-    filename_lower = (file.filename or "").lower()
-    ext = filename_lower.split(".")[-1] if filename_lower and "." in filename_lower else "jpg"
-    if ext not in {"jpg", "jpeg", "png", "webp", "gif"}:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error_type": "invalid_file_extension",
-                "message": f"Unsupported file extension '.{ext}'. Please upload a JPEG, PNG, or WebP image.",
-                "raw": f"extension={ext}",
-            },
-        )
+    try:
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_type": "empty_file",
+                    "message": "The uploaded file is empty. Please select a valid file.",
+                    "raw": "file content length = 0",
+                },
+            )
 
-    # 1. Local Fallback Mode (No Supabase client)
-    if not supabase_client:
-        try:
-            contents = await file.read()
-            if not contents:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error_type": "empty_file",
-                        "message": "The uploaded file is empty. Please select a valid image.",
-                        "raw": "file content length = 0",
-                    },
-                )
-            
+        from app.utils.cloudinary import upload_file_to_cloudinary, is_cloudinary_configured
+
+        # 1. Cloudinary Mode (Standard)
+        if is_cloudinary_configured:
+            public_url = upload_file_to_cloudinary(
+                file_content=contents,
+                filename=file.filename,
+                content_type=content_type or f"application/{ext}" if ext else "application/octet-stream",
+                folder="menus"
+            )
+            return {"image_url": public_url}
+
+        # 2. Local Fallback Mode (If Cloudinary is not configured)
+        else:
             filename = f"{uuid.uuid4()}.{ext}"
             
             # Ensure upload folder exists
@@ -793,58 +802,19 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
             
             logger.info("Local storage fallback used: saved file to %s, public URL: %s", filepath, public_url)
             return {"image_url": public_url}
-            
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error_type": "local_storage_failed",
-                    "message": f"Failed to save file locally: {str(exc)}",
-                    "raw": str(exc),
-                }
-            )
-
-    # 2. Supabase Mode (Standard)
-    filename = f"menus/{uuid.uuid4()}.{ext}"
-    bucket_name = os.environ.get("SUPABASE_BUCKET", "menu-images")
-
-    try:
-        contents = await file.read()
-
-        # Guard against empty uploads
-        if not contents:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error_type": "empty_file",
-                    "message": "The uploaded file is empty. Please select a valid image.",
-                    "raw": "file content length = 0",
-                },
-            )
-
-        supabase_client.storage.from_(bucket_name).upload(
-            filename,
-            contents,
-            {"content-type": content_type},
-        )
 
     except HTTPException:
-        # Re-raise our own validation HTTPExceptions unchanged
         raise
     except Exception as exc:
-        status_code, detail = classify_supabase_error(exc)
-        raise HTTPException(status_code=status_code, detail=detail)
-
-    try:
-        public_url = supabase_client.storage.from_(bucket_name).get_public_url(filename)
-    except Exception as exc:
-        # Upload succeeded but URL generation failed — still a Supabase issue
-        status_code, detail = classify_supabase_error(exc)
-        raise HTTPException(status_code=status_code, detail=detail)
-
-    return {"image_url": public_url}
+        logger.exception("Upload failed:")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_type": "upload_failed",
+                "message": f"Failed to upload file: {str(exc)}",
+                "raw": str(exc),
+            }
+        )
 
 
 # ── LEGACY / DEPRECATED ENDPOINTS ────────────────────────────────────────────

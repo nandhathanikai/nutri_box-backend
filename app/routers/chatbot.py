@@ -127,6 +127,7 @@ def get_pdf_status():
         return {
             "uploaded": False,
             "filename": None,
+            "pdf_url": None,
             "uploaded_at": None,
             "total_chunks": 0
         }
@@ -138,6 +139,7 @@ def get_pdf_status():
         return {
             "uploaded": True,
             "filename": data.get("filename", "knowledge.pdf"),
+            "pdf_url": data.get("pdf_url"),
             "uploaded_at": data.get("uploaded_at"),
             "total_chunks": len(data.get("chunks", []))
         }
@@ -146,14 +148,16 @@ def get_pdf_status():
         return {
             "uploaded": False,
             "filename": None,
+            "pdf_url": None,
             "uploaded_at": None,
             "total_chunks": 0,
             "error": "Failed to read knowledge file"
         }
 
+
 @router.post("/upload-pdf", dependencies=[Depends(require_admin)])
 def upload_pdf(file: UploadFile = File(...)):
-    """Upload PDF, parse into overlapping chunks, generate embeddings, and save locally."""
+    """Upload PDF to Cloudinary, parse into overlapping chunks, generate embeddings, and save locally."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF documents are supported.")
     
@@ -163,8 +167,13 @@ def upload_pdf(file: UploadFile = File(...)):
     os.makedirs("static/uploads", exist_ok=True)
     temp_path = f"static/uploads/temp_{file.filename}"
     try:
+        # Read the file contents once
+        contents = file.file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="The uploaded PDF file is empty.")
+            
         with open(temp_path, "wb") as f:
-            f.write(file.file.read())
+            f.write(contents)
             
         chunks = extract_pdf_chunks(temp_path)
         if not chunks:
@@ -176,9 +185,30 @@ def upload_pdf(file: UploadFile = File(...)):
         if not knowledge_base:
             raise HTTPException(status_code=500, detail="Failed to generate embeddings for the PDF text chunks.")
             
+        from app.utils.cloudinary import upload_file_to_cloudinary, is_cloudinary_configured
+        
+        pdf_url = None
+        if is_cloudinary_configured:
+            pdf_url = upload_file_to_cloudinary(
+                file_content=contents,
+                filename=file.filename,
+                content_type="application/pdf",
+                folder="chatbot_kb"
+            )
+        else:
+            import uuid
+            # Keep a persistent copy in static/uploads for fallback local serving
+            local_filename = f"kb_{uuid.uuid4()}_{file.filename}"
+            local_path = os.path.join("static/uploads", local_filename)
+            with open(local_path, "wb") as f:
+                f.write(contents)
+            pdf_url = f"/static/uploads/{local_filename}"
+            logger.info("Local storage fallback used for PDF: saved to %s", local_path)
+
         # Write to JSON storage
         knowledge_data = {
             "filename": file.filename,
+            "pdf_url": pdf_url,
             "uploaded_at": datetime.now().isoformat(),
             "chunks": knowledge_base
         }
@@ -189,6 +219,7 @@ def upload_pdf(file: UploadFile = File(...)):
         return {
             "message": "PDF uploaded and parsed successfully.",
             "filename": file.filename,
+            "pdf_url": pdf_url,
             "total_chunks": len(knowledge_base)
         }
     finally:
